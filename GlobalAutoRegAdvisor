@@ -29,11 +29,14 @@ matplotlib.use('Agg')
 from io import BytesIO
 import base64
 
+# Import configuration
+import config
+
 # Set page configuration
 st.set_page_config(
-    page_title="Automotive Regulations AI Assistant",
-    page_icon="🚗",
-    layout="wide",
+    page_title=config.APP_TITLE,
+    page_icon=config.APP_ICON,
+    layout=config.APP_LAYOUT,
     initial_sidebar_state="expanded"
 )
 
@@ -43,7 +46,7 @@ class UsageLogger:
     Handles the logging of user queries, errors, and system usage.
     Stores logs in a SQLite database with admin-only access.
     """
-    def __init__(self, db_path="logs/usage_logs.db"):
+    def __init__(self, db_path=config.LOG_DB_PATH):
         """Initialize the logger with the path to the SQLite database"""
         # Create logs directory if it doesn't exist
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
@@ -90,11 +93,11 @@ class UsageLogger:
         # Add default admin if none exists
         cursor.execute("SELECT COUNT(*) FROM admin_users")
         if cursor.fetchone()[0] == 0:
-            # Create default admin with password 'admin123' (should be changed)
-            default_pass = hashlib.sha256('admin123'.encode()).hexdigest()
+            # Create default admin with password from config
+            default_pass = hashlib.sha256(config.DEFAULT_ADMIN_PASSWORD.encode()).hexdigest()
             cursor.execute(
                 "INSERT INTO admin_users VALUES (?, ?, ?)",
-                ('admin', default_pass, datetime.datetime.now().isoformat())
+                (config.DEFAULT_ADMIN_USERNAME, default_pass, datetime.datetime.now().isoformat())
             )
         
         conn.commit()
@@ -188,12 +191,16 @@ It only references official regulatory documents and will not hallucinate inform
 
 # Sidebar for configuration and information
 with st.sidebar:
-    st.header("Configuration")
-    groq_api_key = st.text_input("Groq API Key", type="password")
-    model_name = st.selectbox(
-        "Select LLM Model",
-        ["llama3-70b-8192", "llama3-8b-8192", "mixtral-8x7b-32768"]
-    )
+    st.header("Information")
+    st.markdown(f"""
+    **Current Model**: {config.DEFAULT_MODEL}
+    
+    This assistant uses:
+    - Llama model via Groq API
+    - RAG (Retrieval Augmented Generation)
+    - Advanced web crawling techniques
+    - Document processing capabilities
+    """)
     
     # Admin panel (hidden by default)
     if st.sidebar.checkbox("Admin Access", False):
@@ -219,16 +226,6 @@ with st.sidebar:
                     st.sidebar.metric("Error Rate", f"{(len(logs_df[logs_df['response_status'] == 'error']) / len(logs_df) * 100):.1f}%")
                 else:
                     st.sidebar.error("Invalid credentials")
-    
-    st.markdown("---")
-    st.header("About")
-    st.markdown("""
-    This assistant uses:
-    - Llama model via Groq API
-    - RAG (Retrieval Augmented Generation)
-    - Advanced web crawling techniques
-    - Document processing for large regulatory files
-    """)
 
 # Initialize session state
 if 'history' not in st.session_state:
@@ -238,29 +235,8 @@ if 'documents' not in st.session_state:
 if 'vectorstore' not in st.session_state:
     st.session_state.vectorstore = None
 
-# Define regulatory websites and their document paths
-REGULATORY_WEBSITES = {
-    'UNECE': {
-        'base_url': 'https://unece.org',
-        'regulations_path': '/transport/vehicle-regulations/regulations',
-        'doc_patterns': ['.pdf', '/regulation/']
-    },
-    'EU': {
-        'base_url': 'https://eur-lex.europa.eu',
-        'regulations_path': '/EN/legal-content/EN/TXT/?uri=',
-        'doc_patterns': ['.pdf', 'CELEX:']
-    },
-    'NHTSA': {
-        'base_url': 'https://www.nhtsa.gov',
-        'regulations_path': '/laws-regulations/fmvss',
-        'doc_patterns': ['.pdf', '/fmvss/']
-    },
-    'Transport Canada': {
-        'base_url': 'https://tc.canada.ca',
-        'regulations_path': '/en/transport-canada/corporate/acts-regulations/regulations/sor-95-147.html',
-        'doc_patterns': ['.pdf', '/regulations/']
-    },
-}
+# Define regulatory websites from config
+REGULATORY_WEBSITES = config.REGULATORY_WEBSITES
 
 # Class for handling web requests with retry logic and anti-blocking techniques
 class RegulatoryWebCrawler:
@@ -294,7 +270,7 @@ class RegulatoryWebCrawler:
         
         return None
     
-    def find_regulatory_documents(self, query, max_docs=5):
+    def find_regulatory_documents(self, query, max_docs=config.MAX_DOCUMENTS):
         """Find regulatory documents related to the query"""
         documents = []
         
@@ -440,7 +416,7 @@ class DocumentProcessor:
         
         return vectorstore
     
-    def get_relevant_context(self, vectorstore, query, k=5):
+    def get_relevant_context(self, vectorstore, query, k=config.MAX_RETRIEVAL_CHUNKS):
         """Get relevant context for a query"""
         if not vectorstore:
             return []
@@ -455,7 +431,7 @@ class DocumentProcessor:
 
 # LLM Chain with MCP (Multi-Chain Prompting) for accurate answers
 class RegulatoryLLMChain:
-    def __init__(self, api_key, model_name="llama3-70b-8192"):
+    def __init__(self, api_key=config.GROQ_API_KEY, model_name=config.DEFAULT_MODEL):
         self.api_key = api_key
         self.model_name = model_name
         self.llm = ChatGroq(
@@ -626,7 +602,7 @@ def main():
     # User input
     user_query = st.text_input("🔍 Ask about automotive regulations:", placeholder="Example: What are the EU requirements for Advanced Emergency Braking Systems in trucks?")
     
-    if st.button("Submit", type="primary") and user_query and groq_api_key:
+    if st.button("Submit", type="primary") and user_query:
         try:
             with st.spinner("Processing your query..."):
                 # Log the start of the query process
@@ -643,7 +619,7 @@ def main():
                         query=user_query,
                         response_status="error",
                         error_message=error_message,
-                        model_used=model_name
+                        model_used=config.DEFAULT_MODEL
                     )
                     return
                 
@@ -672,7 +648,7 @@ def main():
                         query=user_query,
                         response_status="error",
                         error_message=error_message,
-                        model_used=model_name
+                        model_used=config.DEFAULT_MODEL
                     )
                     return
                 
@@ -683,7 +659,7 @@ def main():
                 relevant_docs = processor.get_relevant_context(vectorstore, user_query)
                 
                 # Step 5: Generate response using LLM
-                llm_chain = RegulatoryLLMChain(api_key=groq_api_key, model_name=model_name)
+                llm_chain = RegulatoryLLMChain()
                 response = llm_chain.generate_response(user_query, relevant_docs)
                 
                 # Add to history
@@ -697,7 +673,7 @@ def main():
                     query=user_query,
                     response_status="success",
                     documents_retrieved=len(documents),
-                    model_used=model_name
+                    model_used=config.DEFAULT_MODEL
                 )
                 
         except Exception as e:
@@ -708,7 +684,7 @@ def main():
                 query=user_query,
                 response_status="error",
                 error_message=error_message,
-                model_used=model_name
+                model_used=config.DEFAULT_MODEL
             )
     
     # Display conversation history
@@ -720,7 +696,7 @@ def main():
             st.markdown("---")
 
 # Admin utility functions (separate from the main application)
-def admin_view_logs(db_path="logs/usage_logs.db"):
+def admin_view_logs(db_path=config.LOG_DB_PATH):
     """Standalone utility for admins to view logs (can be run separately)"""
     if not os.path.exists(db_path):
         print(f"Log database not found at {db_path}")
@@ -743,7 +719,7 @@ def admin_view_logs(db_path="logs/usage_logs.db"):
         conn.close()
 
 # Function to securely modify admin credentials
-def change_admin_password(username, new_password, db_path="logs/usage_logs.db"):
+def change_admin_password(username, new_password, db_path=config.LOG_DB_PATH):
     """Utility to change admin password (can be run separately)"""
     if not os.path.exists(db_path):
         print(f"Database not found at {db_path}")
@@ -780,4 +756,4 @@ if __name__ == "__main__":
     
     # Uncomment these lines to run admin utilities (when running script directly)
     # admin_view_logs()
-    # change_admin_password('admin', 'new_secure_password')
+    # change_admin_password(config.DEFAULT_ADMIN_USERNAME, 'new_secure_password')
