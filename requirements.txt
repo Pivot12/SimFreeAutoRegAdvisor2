@@ -12,3 +12,5 @@ pydantic
 matplotlib
 networkx
 pillow
+faiss-cpu 
+huggingface_hub
