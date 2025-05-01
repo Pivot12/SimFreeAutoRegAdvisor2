@@ -5,6 +5,7 @@ beautifulsoup4
 pandas
 groq
 langchain
+langchain-community
 langgraph
 langchain-groq
 streamlit-mermaid
@@ -14,3 +15,4 @@ networkx
 pillow
 faiss-cpu 
 huggingface_hub
+sentence-transformers
