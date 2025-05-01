@@ -2,7 +2,7 @@
 # Configuration file for Automotive Regulations AI Agent
 
 # Groq API Configuration
-GROQ_API_KEY = "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" 
+GROQ_API_KEY = "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"
 
 # Model Configuration
 DEFAULT_MODEL = "llama3-70b-8192"  # Default model to use
@@ -12,7 +12,13 @@ AVAILABLE_MODELS = [
     "mixtral-8x7b-32768"  # Alternative option
 ]
 
-# Regulatory Websites Configuration
+# Interregs Authentication
+INTERREGS_URL = "https://www.interregs.net/db/index.php?id=ATO-01"
+INTERREGS_LOGIN_URL = "https://www.interregs.net/login"
+INTERREGS_EMAIL = "neelshah@lucidmotors.com"
+INTERREGS_PASSWORD = "eyzzp3iw"
+
+# Regulatory Websites Configuration (backup sources)
 REGULATORY_WEBSITES = {
     'UNECE': {
         'base_url': 'https://unece.org',
@@ -39,15 +45,15 @@ REGULATORY_WEBSITES = {
 # Logging Configuration
 LOG_DB_PATH = "logs/usage_logs.db"
 
-# Default Admin Credentials
+# Default Admin Credentials (for first-time setup only)
 DEFAULT_ADMIN_USERNAME = "admin"
-DEFAULT_ADMIN_PASSWORD = "neellucid0147"  # Should be changed immediately after first login
+DEFAULT_ADMIN_PASSWORD = "admin123"  # Should be changed immediately after first login
 
 # Document Retrieval Settings
 MAX_DOCUMENTS = 5
 MAX_RETRIEVAL_CHUNKS = 5
 
 # Application Settings
-APP_TITLE = "Automotive Regulations AI Agent"
+APP_TITLE = "Automotive Regulations AI Assistant"
 APP_ICON = "🚗"
 APP_LAYOUT = "wide"
