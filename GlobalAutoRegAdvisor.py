@@ -192,14 +192,9 @@ It only references official regulatory documents and will not hallucinate inform
 # Sidebar for configuration and information
 with st.sidebar:
     st.header("Information")
-    st.markdown(f"""
-    **Current Model**: {config.DEFAULT_MODEL}
-    
-    This assistant uses:
-    - Llama model via Groq API
-    - RAG (Retrieval Augmented Generation)
-    - Advanced web crawling techniques
-    - Document processing capabilities
+    st.markdown("""
+    This assistant provides accurate information about automotive regulations worldwide.
+    It searches official regulatory sources and provides verifiable answers.
     """)
     
     # Admin panel (hidden by default)
@@ -253,11 +248,57 @@ class RegulatoryWebCrawler:
         self.session = requests.Session()
         self.session.headers.update(self.headers)
         
+        # Login to Interregs upon initialization
+        self._login_to_interregs()
+        
+    def _login_to_interregs(self):
+        """Login to Interregs.net with credentials from config"""
+        try:
+            # First get the login page to capture any tokens/cookies
+            login_response = self.session.get(config.INTERREGS_LOGIN_URL, timeout=15)
+            
+            if login_response.status_code == 200:
+                # Parse the login form to get any CSRF token if needed
+                soup = BeautifulSoup(login_response.text, 'html.parser')
+                
+                # Prepare login data
+                login_data = {
+                    'email': config.INTERREGS_EMAIL,
+                    'password': config.INTERREGS_PASSWORD,
+                    'remember': '1',  # Optional: stay logged in
+                }
+                
+                # Extract CSRF token if it exists
+                csrf_token = soup.find('input', {'name': 'csrf_token'})
+                if csrf_token:
+                    login_data['csrf_token'] = csrf_token.get('value', '')
+                
+                # Submit login form
+                post_response = self.session.post(
+                    config.INTERREGS_LOGIN_URL,
+                    data=login_data,
+                    allow_redirects=True,
+                    timeout=15
+                )
+                
+                # Check if login was successful
+                if post_response.status_code == 200:
+                    # Verify login success by checking for specific elements
+                    if 'Welcome' in post_response.text or 'Dashboard' in post_response.text or 'Logout' in post_response.text:
+                        return True
+            
+            st.warning("Failed to login to Interregs.net. Will try to continue anyway.")
+            return False
+            
+        except Exception as e:
+            st.warning(f"Error logging into Interregs.net: {e}")
+            return False
+        
     def get_with_retry(self, url, max_retries=3, delay=2):
         """Get a URL with retry logic and randomized delays to avoid blocking"""
         for attempt in range(max_retries):
             try:
-                response = self.session.get(url, timeout=10)
+                response = self.session.get(url, timeout=15)  # Increased timeout
                 if response.status_code == 200:
                     return response
                 else:
@@ -270,12 +311,83 @@ class RegulatoryWebCrawler:
         
         return None
     
-    def find_regulatory_documents(self, query, max_docs=config.MAX_DOCUMENTS):
-        """Find regulatory documents related to the query"""
+    def find_interregs_documents(self, query):
+        """Find regulatory documents from Interregs.net"""
         documents = []
         
-        # For each regulatory website, try to find relevant documents
+        try:
+            # Create search URL for Interregs
+            search_terms = '+'.join(query.split())
+            search_url = f"{config.INTERREGS_URL}&search={search_terms}"
+            
+            # Get the search results page
+            response = self.get_with_retry(search_url)
+            if not response:
+                return []
+            
+            # Parse the search results to find document links
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Look for regulation links - adjust these selectors based on the actual site structure
+            result_links = soup.select('a.regulation-link, a.document-link, div.search-result a, table.results a')
+            
+            # If no specific classes found, try a more general approach
+            if not result_links:
+                # Look for any link that might be a document based on text content or href
+                all_links = soup.find_all('a', href=True)
+                result_links = [link for link in all_links if 
+                               ('regulation' in link.get('href', '').lower() or
+                                'document' in link.get('href', '').lower() or
+                                'pdf' in link.get('href', '').lower() or
+                                (link.text and any(term.lower() in link.text.lower() for term in query.split())))]
+            
+            # Process found links
+            for link in result_links:
+                href = link['href']
+                
+                # Ensure we have absolute URLs
+                if not href.startswith('http'):
+                    if href.startswith('/'):
+                        doc_url = f"https://www.interregs.net{href}"
+                    else:
+                        doc_url = f"https://www.interregs.net/{href}"
+                else:
+                    doc_url = href
+                
+                # Get document title
+                doc_title = link.text.strip() if link.text.strip() else doc_url.split('/')[-1]
+                
+                # Add document info
+                doc_info = {
+                    'title': doc_title,
+                    'url': doc_url,
+                    'authority': 'Interregs'
+                }
+                
+                if doc_info not in documents:
+                    documents.append(doc_info)
+            
+            return documents
+            
+        except Exception as e:
+            st.warning(f"Error searching Interregs.net: {e}")
+            return []
+    
+    def find_regulatory_documents(self, query, max_docs=config.MAX_DOCUMENTS):
+        """Find regulatory documents related to the query"""
+        # First try Interregs
+        documents = self.find_interregs_documents(query)
+        
+        # If we got enough documents from Interregs, return them
+        if len(documents) >= max_docs:
+            return documents[:max_docs]
+        
+        # Otherwise, try the backup sources
         for authority, site_info in REGULATORY_WEBSITES.items():
+            # Skip if we already have enough documents
+            if len(documents) >= max_docs:
+                break
+                
             # Create search URL or path based on the authority
             if authority == 'UNECE':
                 search_url = f"{site_info['base_url']}{site_info['regulations_path']}"
@@ -328,7 +440,7 @@ class RegulatoryWebCrawler:
                         return documents
         
         return documents
-
+        
     def download_document(self, doc_info):
         """Download and extract text from a document URL"""
         url = doc_info['url']
@@ -368,8 +480,27 @@ class RegulatoryWebCrawler:
             
             # Handle web documents
             else:
-                loader = WebBaseLoader(url)
-                docs = loader.load()
+                response = self.get_with_retry(url)
+                if not response:
+                    return None
+                
+                # Create a temporary HTML file if it's an Interregs page
+                if authority == 'Interregs':
+                    temp_file = f"temp_doc_{hash(url)}.html"
+                    with open(temp_file, 'wb') as f:
+                        f.write(response.content)
+                    
+                    # Use WebBaseLoader with local file
+                    loader = WebBaseLoader(temp_file)
+                    docs = loader.load()
+                    
+                    # Clean up
+                    if os.path.exists(temp_file):
+                        os.remove(temp_file)
+                else:
+                    # Use WebBaseLoader with URL
+                    loader = WebBaseLoader(url)
+                    docs = loader.load()
                 
                 # Add metadata
                 for doc in docs:
@@ -516,34 +647,39 @@ class RegulatoryLLMChain:
 
 # Process Map Generator
 def generate_process_map():
-    """Generate a visual process map of the agent's workflow"""
+    """Generate a modern, polished visual process map of the agent's workflow"""
+    # Use a cleaner style for matplotlib
+    plt.style.use('seaborn-v0_8-whitegrid')
+    
+    # Create a directed graph
     G = nx.DiGraph()
     
-    # Add nodes
+    # Define nodes with positions for better layout control
     nodes = [
-        ("User Query", "User input"),
-        ("Query Analysis", "Understanding user intent"),
-        ("Website Crawling", "Accessing regulatory websites"),
-        ("Document Retrieval", "Finding relevant documents"),
-        ("Document Processing", "Extracting and splitting text"),
-        ("Embedding", "Creating vector representations"),
-        ("Retrieval", "Finding relevant passages"),
-        ("LLM Processing", "Generating accurate response"),
-        ("Response", "Providing answer to user")
+        ("User Query", "Input query", (0, 2)),
+        ("Query Analysis", "Understand intent", (2, 2)),
+        ("Interregs Access", "Fetch regulations", (4, 2)),
+        ("Document Retrieval", "Find documents", (6, 2)),
+        ("Document Processing", "Extract content", (8, 2)),
+        ("Vector Database", "Create embeddings", (7, 0)),
+        ("Context Retrieval", "Get relevant text", (5, 0)),
+        ("LLM Processing", "Generate response", (3, 0)),
+        ("Response", "Display answer", (1, 0))
     ]
     
-    for i, (node, desc) in enumerate(nodes):
-        G.add_node(node, description=desc, pos=(i % 3, i // 3))
+    # Add nodes with positions and descriptions
+    for node, desc, pos in nodes:
+        G.add_node(node, description=desc, pos=pos)
     
     # Add edges
     edges = [
         ("User Query", "Query Analysis"),
-        ("Query Analysis", "Website Crawling"),
-        ("Website Crawling", "Document Retrieval"),
+        ("Query Analysis", "Interregs Access"),
+        ("Interregs Access", "Document Retrieval"),
         ("Document Retrieval", "Document Processing"),
-        ("Document Processing", "Embedding"),
-        ("Embedding", "Retrieval"),
-        ("Retrieval", "LLM Processing"),
+        ("Document Processing", "Vector Database"),
+        ("Vector Database", "Context Retrieval"),
+        ("Context Retrieval", "LLM Processing"),
         ("LLM Processing", "Response"),
         ("Response", "User Query")  # Complete the cycle
     ]
@@ -551,43 +687,92 @@ def generate_process_map():
     for edge in edges:
         G.add_edge(edge[0], edge[1])
     
-    # Create figure
-    plt.figure(figsize=(10, 8))
+    # Create a high-quality figure
+    plt.figure(figsize=(12, 6), dpi=100)
+    
+    # Get positions from node attributes
     pos = nx.get_node_attributes(G, 'pos')
     
-    # Draw nodes
-    nx.draw_networkx_nodes(G, pos, node_size=2000, node_color="lightblue", alpha=0.8)
+    # Define colors and styles
+    node_color = '#4A89DC'  # Modern blue
+    edge_color = '#9BB7D4'  # Lighter blue for edges
+    font_color = '#333333'  # Dark gray for text
+    edge_font_color = '#555555'  # Medium gray for edge text
+    font_size = 11
     
-    # Draw edges
-    nx.draw_networkx_edges(G, pos, edge_color="gray", arrows=True, arrowsize=20)
+    # Draw nodes with increased size and alpha for modern look
+    nx.draw_networkx_nodes(
+        G, 
+        pos, 
+        node_size=2500, 
+        node_color=node_color, 
+        alpha=0.8,
+        edgecolors='white',
+        linewidths=2,
+        node_shape='o'
+    )
     
-    # Draw labels
-    nx.draw_networkx_labels(G, pos, font_size=11, font_family="sans-serif")
+    # Draw edges with curved lines for better visual flow
+    nx.draw_networkx_edges(
+        G, 
+        pos, 
+        edge_color=edge_color, 
+        width=2,
+        alpha=0.7,
+        arrows=True, 
+        arrowsize=20,
+        connectionstyle='arc3,rad=0.1'  # Curved edges
+    )
     
-    # Add node descriptions
-    pos_attrs = {}
+    # Draw primary labels with clear offset to avoid overlapping with nodes
+    nx.draw_networkx_labels(
+        G, 
+        pos, 
+        font_size=font_size,
+        font_family='sans-serif',
+        font_weight='bold',
+        font_color=font_color
+    )
+    
+    # Draw description labels with greater offset to avoid overlapping
+    desc_pos = {}
     for node, coords in pos.items():
-        pos_attrs[node] = (coords[0], coords[1] - 0.1)
+        desc_pos[node] = (coords[0], coords[1] - 0.35)  # Greater offset
     
+    # Get node descriptions
     node_attrs = nx.get_node_attributes(G, 'description')
-    custom_node_attrs = {}
-    for node, attr in node_attrs.items():
-        custom_node_attrs[node] = attr
     
-    nx.draw_networkx_labels(G, pos_attrs, labels=custom_node_attrs, font_size=8, font_color='darkblue')
+    # Draw description labels
+    nx.draw_networkx_labels(
+        G, 
+        desc_pos, 
+        labels=node_attrs, 
+        font_size=font_size-2,  # Smaller font for descriptions
+        font_family='sans-serif',
+        font_color=edge_font_color,
+        alpha=0.8
+    )
     
+    # Set a light background with a subtle gradient
+    ax = plt.gca()
+    
+    # Remove axis
     plt.axis('off')
+    
+    # Set tight layout for better space usage
     plt.tight_layout()
+    
+    # Give the figure a title
+    plt.title('Automotive Regulations AI Process Flow', fontsize=14, fontweight='bold', pad=20)
     
     # Convert plot to base64 string
     buf = BytesIO()
-    plt.savefig(buf, format='png', dpi=300, bbox_inches='tight')
+    plt.savefig(buf, format='png', dpi=300, bbox_inches='tight', facecolor='white', edgecolor='none')
     buf.seek(0)
     img_str = base64.b64encode(buf.read()).decode('utf-8')
     plt.close()
     
     return img_str
-
 # Main application logic
 def main():
     # Display process map in expander
