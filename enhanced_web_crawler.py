@@ -1037,7 +1037,50 @@ class RegulatoryWebCrawler:
         except Exception as e:
             logger.error(f"Browser download failed: {e}")
             return None
-    
+    def get_document_content(self, url):
+        """Get document content with multiple fallback methods"""
+        logger.info(f"Fetching content from: {url}")
+        
+        # First: Try simple requests
+        try:
+            response = self.session.get(url, headers=self.headers, timeout=20)
+            if response.status_code == 200:
+                logger.info(f"Successfully fetched {url} with requests")
+                return response
+        except Exception as e:
+            logger.warning(f"Requests failed for {url}: {e}")
+        
+        # Second: Try Selenium browser
+        try:
+            browser = self._get_browser()
+            if browser:
+                browser.get(url)
+                content = browser.page_source
+                
+                # Create a mock response object
+                class MockResponse:
+                    def __init__(self, content, status_code):
+                        self.content = content.encode('utf-8')
+                        self.status_code = status_code
+                        self.text = content
+                
+                logger.info(f"Successfully fetched {url} with Selenium")
+                return MockResponse(content, 200)
+        except Exception as e:
+            logger.warning(f"Selenium failed for {url}: {e}")
+        
+        # Third: Try Playwright as last resort
+        try:
+            content = self.get_with_playwright(url)
+            if content:
+                logger.info(f"Successfully fetched {url} with Playwright")
+                return content
+        except Exception as e:
+            logger.warning(f"Playwright failed for {url}: {e}")
+        
+        logger.error(f"All methods failed to fetch content from {url}")
+        return None
+        
     def close(self):
         """Close browser if it's open"""
         if self.browser:
@@ -1046,3 +1089,5 @@ class RegulatoryWebCrawler:
             except Exception as e:
                 logger.error(f"Error closing browser: {e}")
             self.browser = None
+
+
