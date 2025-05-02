@@ -35,6 +35,10 @@ from urllib.parse import urlparse
 import random
 import asyncio
 import aiohttp
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service as ChromeService
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.chrome.options import Options
 
 # Import our custom modules
 import config
