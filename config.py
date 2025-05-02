@@ -18,7 +18,7 @@ INTERREGS_LOGIN_URL = "https://www.interregs.net/login"
 INTERREGS_EMAIL = "neelshah@lucidmotors.com"
 INTERREGS_PASSWORD = "eyzzp3iw"
 
-# Regulatory Websites Configuration (backup sources)
+# Regulatory Websites Configuration (backup sources with verified URLs)
 REGULATORY_WEBSITES = {
     'UNECE WP.29': {
         'base_url': 'https://unece.org',
@@ -62,7 +62,7 @@ REGULATORY_WEBSITES = {
     },
     'Japan MLIT': {
         'base_url': 'https://www.mlit.go.jp',
-        'regulations_path': '/en/road/index.html',
+        'regulations_path': '/en/road',
         'doc_patterns': ['.pdf', 'regulation', 'standard', 'vehicle']
     },
     'China MIIT': {
@@ -101,7 +101,7 @@ REGULATORY_WEBSITES = {
         'doc_patterns': ['.pdf', 'regulation', 'standard', 'vehicle']
     },
     'Russia Rosavtodor': {
-        'base_url': 'https://www.rosavtodor.ru',
+        'base_url': 'https://rosavtodor.gov.ru',
         'regulations_path': '/en',
         'doc_patterns': ['.pdf', 'regulation', 'standard', 'vehicle']
     },
@@ -116,8 +116,8 @@ REGULATORY_WEBSITES = {
         'doc_patterns': ['.pdf', 'regulation', 'standard', 'vehicle']
     },
     'Argentina ANSV': {
-        'base_url': 'https://www.ansv.gob.ar',
-        'regulations_path': '/',
+        'base_url': 'https://www.argentina.gob.ar',
+        'regulations_path': '/ansv',
         'doc_patterns': ['.pdf', 'regulation', 'standard', 'vehicle']
     },
     'UK Department for Transport': {
@@ -127,12 +127,34 @@ REGULATORY_WEBSITES = {
     }
 }
 
+# Alternative paths for navigation when primary paths fail
+ALTERNATIVE_PATHS = {
+    'UNECE WP.29': [
+        '/transport/vehicle-regulations',
+        '/areas-of-work/transport/vehicle-regulations-wp29',
+        '/transport/standards/transport',
+        '/areas-of-work/transport'
+    ],
+    'EU European Commission': [
+        '/index_en',
+        '/transport',
+        '/mobility',
+        '/road-safety'
+    ],
+    'NHTSA': [
+        '/laws-regulations',
+        '/laws-regulations/fmvss',
+        '/vehicle-safety',
+        '/research-data'
+    ]
+}
+
 # Logging Configuration
-LOG_DB_PATH = "logs/usage_logs.db"
+LOG_DB_PATH = "logs/auto_regulations.db"
 
 # Default Admin Credentials (for first-time setup only)
 DEFAULT_ADMIN_USERNAME = "admin"
-DEFAULT_ADMIN_PASSWORD = "admin0147"  # Should be changed immediately after first login
+DEFAULT_ADMIN_PASSWORD = "admin123"  # Should be changed immediately after first login
 
 # Document Retrieval Settings
 MAX_DOCUMENTS = 5
@@ -142,3 +164,13 @@ MAX_RETRIEVAL_CHUNKS = 5
 APP_TITLE = "Automotive Regulations AI Assistant"
 APP_ICON = "🚗"
 APP_LAYOUT = "wide"
+
+# Learning Settings
+ENABLE_LEARNING = True
+ENABLE_CACHING = True
+USE_MODEL_CONTEXT_PROTOCOL = True
+
+# Web Crawler Settings
+MAX_RETRIES = 5
+DEFAULT_TIMEOUT = 30
+VERIFY_SSL = True
