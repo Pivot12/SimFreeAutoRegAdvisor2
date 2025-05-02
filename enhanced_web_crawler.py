@@ -149,31 +149,24 @@ class RegulatoryWebCrawler:
                 logger.error(f"Error saving successful path: {e}")
     
     def _get_browser(self):
-        """Initialize headless browser if not already running"""
-        if self.browser is None:
-            try:
-                chrome_options = Options()
-                chrome_options.add_argument("--headless")
-                chrome_options.add_argument("--disable-gpu")
-                chrome_options.add_argument("--no-sandbox")
-                chrome_options.add_argument("--disable-dev-shm-usage")
-                chrome_options.add_argument(f"user-agent={random.choice(self.user_agents)}")
-                
-                # For Streamlit Cloud compatibility
-                try:
-                    self.browser = webdriver.Chrome(options=chrome_options)
-                except WebDriverException:
-                    # If Chrome fails, try using the driver path specifically
-                    chrome_options.binary_location = "/usr/bin/chromium-browser"
-                    self.browser = webdriver.Chrome(options=chrome_options)
-                
-                logger.info("Headless browser initialized successfully")
-            except Exception as e:
-                logger.error(f"Failed to initialize headless browser: {e}")
-                # Fall back to session-based requests
-                logger.warning("Falling back to session-based requests")
-                return None
-        return self.browser
+    """Initialize headless browser with webdriver-manager"""
+    if self.browser is None:
+        try:
+            chrome_options = Options()
+            chrome_options.add_argument("--headless")
+            chrome_options.add_argument("--disable-gpu")
+            chrome_options.add_argument("--no-sandbox")
+            chrome_options.add_argument("--disable-dev-shm-usage")
+            
+            # Use webdriver-manager to handle driver installation
+            service = ChromeService(ChromeDriverManager().install())
+            self.browser = webdriver.Chrome(service=service, options=chrome_options)
+            
+            logger.info("Headless browser initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize headless browser: {e}")
+            return None
+    return self.browser
     
     def verify_url(self, url):
         """Verify if a URL exists and is accessible"""
