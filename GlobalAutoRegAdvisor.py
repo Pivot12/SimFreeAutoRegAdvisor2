@@ -22,13 +22,63 @@ from langchain_community.embeddings import OpenAIEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 # LLM integration
-import openai
+import json
+import httpx
 from langchain.chains import RetrievalQA
-from langchain_openai import ChatOpenAI
+from langchain.llms.base import LLM
+from typing import Any, List, Mapping, Optional
+from langchain.callbacks.manager import CallbackManagerForLLMRun
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+class GroqLLM(LLM):
+    """
+    Custom LLM wrapper for Groq API with Llama model.
+    """
+    
+    groq_api_key: str
+    model_name: str = "llama3-70b-8192"
+    temperature: float = 0
+    
+    @property
+    def _llm_type(self) -> str:
+        return "groq_llm"
+    
+    def _call(
+        self,
+        prompt: str,
+        stop: Optional[List[str]] = None,
+        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        **kwargs: Any,
+    ) -> str:
+        headers = {
+            "Authorization": f"Bearer {self.groq_api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": self.model_name,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": self.temperature
+        }
+        
+        if stop:
+            payload["stop"] = stop
+        
+        try:
+            with httpx.Client(timeout=120.0) as client:
+                response = client.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers=headers,
+                    json=payload
+                )
+                response.raise_for_status()
+                return response.json()["choices"][0]["message"]["content"]
+        except Exception as e:
+            logger.error(f"Error calling Groq API: {e}")
+            raise
 
 class AutoRegulationAdvisor:
     """
@@ -36,16 +86,15 @@ class AutoRegulationAdvisor:
     by retrieving and using actual regulatory documents.
     """
     
-    def __init__(self, openai_api_key: str, data_dir: str = "regulatory_data"):
+    def __init__(self, groq_api_key: str, data_dir: str = "regulatory_data"):
         """
         Initialize the AutoRegulationAdvisor agent.
         
         Args:
-            openai_api_key: API key for OpenAI
+            groq_api_key: API key for Groq
             data_dir: Directory to store the regulatory documents and vector database
         """
-        self.openai_api_key = openai_api_key
-        openai.api_key = openai_api_key
+        self.groq_api_key = groq_api_key
         
         # Set up directories
         self.data_dir = Path(data_dir)
@@ -66,17 +115,21 @@ class AutoRegulationAdvisor:
             length_function=len,
         )
         
-        # Set up embeddings and vector store
-        self.embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
+        # Set up embeddings using sentence-transformers (free alternative to OpenAI embeddings)
+        from langchain_community.embeddings import HuggingFaceEmbeddings
+        
+        self.embeddings = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2"
+        )
         
         # Initialize the vector store if it exists, otherwise it will be created when documents are added
         self._initialize_vector_store()
         
-        # Set up the LLM
-        self.llm = ChatOpenAI(
-            model_name="gpt-4-turbo",
-            temperature=0,
-            openai_api_key=openai_api_key
+        # Set up the LLM using Groq
+        self.llm = GroqLLM(
+            groq_api_key=groq_api_key,
+            model_name="llama3-70b-8192",
+            temperature=0
         )
     
     def _initialize_regulatory_sources(self) -> Dict[str, Dict[str, Any]]:
@@ -620,17 +673,8 @@ class AutoRegulationAdvisor:
         
         # Query the LLM
         try:
-            response = openai.ChatCompletion.create(
-                model="gpt-4-turbo",
-                messages=[
-                    {"role": "system", "content": "You are an AI expert in automotive regulations. Your task is to provide accurate information based solely on the provided regulatory documents. Do not make up information or cite regulations that are not in the provided documents."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0
-            )
-            
-            # Extract the answer
-            answer = response['choices'][0]['message']['content']
+            # Use the initialized Groq LLM directly
+            answer = self.llm(prompt)
             
             # Clean the response
             clean_response = self._clean_response(answer)
