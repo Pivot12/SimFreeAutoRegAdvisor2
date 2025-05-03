@@ -922,111 +922,73 @@ class RegulatoryWebCrawler:
             else:
                 return f"{search_url}?q={search_terms}"
     
+  
     def download_document(self, doc_info):
-        """
-        Enhanced document downloading with diverse format handling,
-        error recovery, and partial content extraction
-        """
+        """Download and extract text from a document URL"""
         url = doc_info['url']
         authority = doc_info['authority']
         title = doc_info['title']
         
-        logger.info(f"Downloading document: {title} from {authority} ({url})")
-        
         try:
             # Handle PDF documents
             if url.lower().endswith('.pdf'):
-                # Try to download using session first
                 response = self.get_document_content(url)
                 if not response:
                     return None
-                
-                # Save temporary file
-                temp_file = f"temp_doc_{hash(url)}.pdf"
+                    
+                # Use absolute path for temp file
+                temp_file = os.path.abspath(f"temp_doc_{hash(url)}.pdf")
                 with open(temp_file, 'wb') as f:
                     f.write(response.content)
                 
-                try:
-                    # Use langchain's PyPDFLoader
-                    loader = PyPDFLoader(temp_file)
-                    docs = loader.load()
-                    
-                    # Add metadata
-                    for doc in docs:
-                        doc.metadata.update({
-                            'source': url,
-                            'authority': authority,
-                            'title': title
-                        })
-                    
-                    logger.info(f"Successfully loaded PDF with {len(docs)} pages")
-                    
-                    # Clean up
-                    if os.path.exists(temp_file):
-                        os.remove(temp_file)
-                    
-                    return docs
-                except Exception as e:
-                    logger.error(f"Error processing PDF: {e}")
-                    
-                    # Clean up
-                    if os.path.exists(temp_file):
-                        os.remove(temp_file)
-                    
-                    # Try browser-based approach as fallback
-                    return self._download_with_browser(url, authority, title)
-            
-            # Handle web documents
-            else:
-                # Handle Interregs specifically
-                if authority == 'Interregs':
-                    # Make sure we're logged in
-                    if not self.auth_status.get('interregs', False):
-                        self.login_to_interregs()
+                # Use langchain's PyPDFLoader
+                loader = PyPDFLoader(temp_file)
+                docs = loader.load()
                 
-                # Try to fetch content
+                # Clean up
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+                
+                # Add metadata
+                for doc in docs:
+                    doc.metadata.update({
+                        'source': url,
+                        'authority': authority,
+                        'title': title
+                    })
+                
+                return docs
+            
+            # Handle web documents - MODIFIED APPROACH
+            else:
                 response = self.get_document_content(url)
                 if not response:
-                    return self._download_with_browser(url, authority, title)
+                    return None
+                    
+                # Extract text directly without saving to file
+                html_content = response.text
+                soup = BeautifulSoup(html_content, 'html.parser')
                 
-                # Create a temporary HTML file
-                temp_file = f"temp_doc_{hash(url)}.html"
-                with open(temp_file, 'wb') as f:
-                    f.write(response.content)
+                # Extract the main content
+                text_content = soup.get_text(separator=' ', strip=True)
                 
-                try:
-                    # Use WebBaseLoader with local file
-                    loader = WebBaseLoader(temp_file)
-                    docs = loader.load()
+                # Create document directly 
+                from langchain.schema import Document
+                doc = Document(
+                    page_content=text_content,
+                    metadata={
+                        'source': url,
+                        'authority': authority,
+                        'title': title
+                    }
+                )
+                
+                return [doc]
                     
-                    # Add metadata
-                    for doc in docs:
-                        doc.metadata.update({
-                            'source': url,
-                            'authority': authority,
-                            'title': title
-                        })
-                    
-                    logger.info(f"Successfully loaded web document with {len(docs)} sections")
-                    
-                    # Clean up
-                    if os.path.exists(temp_file):
-                        os.remove(temp_file)
-                    
-                    return docs
-                except Exception as e:
-                    logger.error(f"Error processing web document: {e}")
-                    
-                    # Clean up
-                    if os.path.exists(temp_file):
-                        os.remove(temp_file)
-                    
-                    # Try browser-based approach as fallback
-                    return self._download_with_browser(url, authority, title)
-        
         except Exception as e:
             logger.error(f"Error downloading document {url}: {e}")
-            return self._download_with_browser(url, authority, title)
+            logger.error(traceback.format_exc())
+            return None
     
     def _download_with_browser(self, url, authority, title):
         """Download document using browser as a fallback"""
