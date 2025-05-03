@@ -65,6 +65,35 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+def clean_response(response):
+    """Clean LLM response to ensure only content is returned"""
+    if isinstance(response, str):
+        # Clean the string of any metadata patterns
+        response = re.sub(r'content="(.*?)"', r'\1', response)
+        response = re.sub(r'additional_kwargs=\{\}.*', '', response, flags=re.DOTALL)
+        response = re.sub(r'response_metadata=\{.*?\}', '', response, flags=re.DOTALL)
+        response = re.sub(r'usage_metadata=\{.*?\}', '', response, flags=re.DOTALL)
+        response = re.sub(r'id=\'run--.*?\'', '', response)
+        return response.strip()
+        
+    if hasattr(response, 'content'):
+        return response.content
+        
+    if hasattr(response, 'choices') and len(response.choices) > 0:
+        return response.choices[0].message.content
+    
+    # Deep inspection for nested content
+    if isinstance(response, dict):
+        if 'content' in response:
+            return response['content']
+        if 'choices' in response and len(response['choices']) > 0:
+            choice = response['choices'][0]
+            if isinstance(choice, dict) and 'message' in choice:
+                return choice['message'].get('content', '')
+    
+    # Last resort
+    return str(response)
+    
 # Learning settings
 ENABLE_LEARNING = True
 ENABLE_CACHING = True
@@ -460,7 +489,32 @@ class EnhancedRegulatoryLLMChain:
                 "extraction": extraction
             })
             
-            return final_response
+            if isinstance(final_response, str):
+                return final_response
+            
+            # If it's a langchain response object
+            if hasattr(final_response, 'content'):
+                return final_response.content
+                
+            # If it's a Groq API response object
+            if hasattr(final_response, 'choices') and len(final_response.choices) > 0:
+                return final_response.choices[0].message.content
+                
+            # If it's a dictionary or has other structure
+            if isinstance(final_response, dict) and 'content' in final_response:
+                return final_response['content']
+                
+            # Last resort - convert to string and clean up
+            response_str = str(final_response)
+            # Remove metadata patterns
+            response_str = re.sub(r'token_usage.*?}', '', response_str, flags=re.DOTALL)
+            response_str = re.sub(r'additional_kwargs=\{\}', '', response_str)
+            response_str = re.sub(r'response_metadata=\{.*?\}', '', response_str, flags=re.DOTALL)
+            response_str = re.sub(r'id=\'run--.*?\'', '', response_str)
+            response_str = re.sub(r'usage_metadata=\{.*?\}', '', response_str, flags=re.DOTALL)
+            
+            return response_str.strip()
+            
         except Exception as e:
             logger.error(f"Error generating response: {e}")
             logger.error(traceback.format_exc())
@@ -723,7 +777,7 @@ async def process_query_async(user_query):
             # Save last query for feedback
             st.session_state.last_query = user_query
             
-            return response
+            return clean_response(response)
             
     except Exception as e:
         error_message = f"An error occurred: {str(e)}"
