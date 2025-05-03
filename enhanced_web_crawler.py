@@ -9,6 +9,8 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 import selenium
 from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -17,6 +19,8 @@ from selenium.common.exceptions import TimeoutException, WebDriverException
 from langchain_community.document_loaders import PyPDFLoader, WebBaseLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 import streamlit as st
+import asyncio
+from playwright.async_api import async_playwright
 
 # Configure logging
 logging.basicConfig(
@@ -149,7 +153,7 @@ class RegulatoryWebCrawler:
                 logger.error(f"Error saving successful path: {e}")
     
     def _get_browser(self):
-        """Initialize headless browser with cloud-compatible settings"""
+        """Initialize headless browser with webdriver-manager"""
         if self.browser is None:
             try:
                 chrome_options = Options()
@@ -158,15 +162,82 @@ class RegulatoryWebCrawler:
                 chrome_options.add_argument("--no-sandbox")
                 chrome_options.add_argument("--disable-dev-shm-usage")
                 
-                # For Streamlit Cloud compatibility
-                chrome_options.binary_location = "/usr/bin/chromium-browser"
+                # Try to use webdriver-manager approach
+                try:
+                    service = Service(ChromeDriverManager().install())
+                    self.browser = webdriver.Chrome(service=service, options=chrome_options)
+                    logger.info("Browser initialized with webdriver-manager")
+                    return self.browser
+                except Exception as e:
+                    logger.warning(f"webdriver-manager approach failed: {e}")
                 
-                self.browser = webdriver.Chrome(options=chrome_options)
-                logger.info("Headless browser initialized successfully")
+                # Fallback to default approach
+                try:
+                    self.browser = webdriver.Chrome(options=chrome_options)
+                    logger.info("Browser initialized with default Chrome")
+                    return self.browser
+                except Exception as e:
+                    logger.warning(f"Default Chrome approach failed: {e}")
+                    
+                logger.error("All browser initialization methods failed")
+                return None
             except Exception as e:
                 logger.error(f"Failed to initialize headless browser: {e}")
                 return None
         return self.browser
+
+    def find_documents_without_browser(self, query, authority, site_info):
+        """Find documents without using a browser"""
+        documents = []
+        search_url = self._construct_search_url(site_info['base_url'], site_info['regulations_path'], query, authority)
+        
+        # Use requests instead of selenium
+        try:
+            response = self.session.get(search_url, timeout=30)
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.text, 'html.parser')
+                links = soup.find_all('a', href=True)
+                
+                # Filter links that match document patterns
+                for link in links:
+                    href = link['href']
+                    if any(pattern in href.lower() for pattern in site_info['doc_patterns']):
+                        doc_info = self._process_link(link, authority)
+                        if doc_info and doc_info not in documents:
+                            documents.append(doc_info)
+            
+            return documents
+        except Exception as e:
+            logger.error(f"Error in browser-less document search: {e}")
+            return []
+
+    async def _get_content_with_playwright(self, url):
+        """Get page content using Playwright"""
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                page = await browser.new_page()
+                await page.goto(url)
+                content = await page.content()
+                await browser.close()
+                return content
+        except Exception as e:
+            logger.error(f"Playwright error: {e}")
+            return None
+    
+    def get_with_playwright(self, url):
+        """Synchronous wrapper for Playwright"""
+        content = asyncio.run(self._get_content_with_playwright(url))
+        if content:
+            # Create a mock response object
+            class MockResponse:
+                def __init__(self, content, status_code):
+                    self.content = content.encode('utf-8')
+                    self.status_code = status_code
+                    self.text = content
+            
+            return MockResponse(content, 200)
+        return None
     
     def verify_url(self, url):
         """Verify if a URL exists and is accessible"""
@@ -447,7 +518,7 @@ class RegulatoryWebCrawler:
                             else:
                                 search_url = f"{search_url}?search={'+'.join(query.split())}"
                             
-                            response = self.get_with_retry(search_url)
+                            response = self.get_document_content(search_url)
                             if response and response.status_code == 200:
                                 # Extract document links
                                 new_docs = self._extract_document_links(response, "Interregs")
@@ -468,7 +539,7 @@ class RegulatoryWebCrawler:
                     search_url = f"https://www.interregs.net{pattern}"
                     logger.info(f"Searching Interregs with URL: {search_url}")
                     
-                    response = self.get_with_retry(search_url)
+                    response = self.get_document_content(search_url)
                     if response and response.status_code == 200:
                         new_docs = self._extract_document_links(response, "Interregs")
                         if new_docs:
@@ -693,7 +764,7 @@ class RegulatoryWebCrawler:
                     continue
                 
                 # Get search results page
-                response = self.get_with_retry(search_url)
+                response = self.get_document_content(search_url)
                 if not response:
                     continue
                 
@@ -757,7 +828,7 @@ class RegulatoryWebCrawler:
                                     )
                                     
                                     if search_url and self.verify_url(search_url):
-                                        response = self.get_with_retry(search_url)
+                                        response = self.get_document_content(search_url)
                                         if response and response.status_code == 200:
                                             soup = BeautifulSoup(response.text, 'html.parser')
                                             links = soup.find_all('a', href=True)
@@ -866,7 +937,7 @@ class RegulatoryWebCrawler:
             # Handle PDF documents
             if url.lower().endswith('.pdf'):
                 # Try to download using session first
-                response = self.get_with_retry(url)
+                response = self.get_document_content(url)
                 if not response:
                     return None
                 
@@ -914,7 +985,7 @@ class RegulatoryWebCrawler:
                         self.login_to_interregs()
                 
                 # Try to fetch content
-                response = self.get_with_retry(url)
+                response = self.get_document_content(url)
                 if not response:
                     return self._download_with_browser(url, authority, title)
                 
