@@ -348,7 +348,7 @@ class ModelContextProtocol:
             
             logger.info("Completed response generation phase")
             
-            return final_response
+            return clean_response(response)
         except Exception as e:
             logger.error(f"Error in MCP response generation: {e}")
             logger.error(traceback.format_exc())
