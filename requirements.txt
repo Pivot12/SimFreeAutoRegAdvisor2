@@ -10,17 +10,13 @@ requests==2.31.0
 beautifulsoup4==4.12.2
 PyPDF2==3.0.1
 
-# Vector database and embeddings
-langchain==0.1.1
-langchain-community==0.0.13
-chromadb==0.4.22
-sentence-transformers==2.2.2
-torch==2.1.0
+# Database
+sqlite3==2.6.0
 
-# Async support
-httpx==0.25.2
+# Asynchronous support
 aiofiles==23.2.1
 
 # Utilities
 python-multipart==0.0.6
 typing-extensions==4.9.0
+dataclasses==0.6
