@@ -1,371 +1,371 @@
 # Calculate base score
-        base_score = min(0.95, 0.3 + (term_density / 10) + phrase_boost)
+base_score = min(0.95, 0.3 + (term_density / 10) + phrase_boost)
         
-        # Check for regulation numbers
-        reg_patterns = [
-            r'[RU]N?[ -]?R?[ -]?(\d+)',  # UN R## patterns
-            r'FMVSS[ -]?(\d+)',  # FMVSS ## patterns
-            r'[EU][UC][ -]?(\d+/\d+)',  # EU regulations
-            r'GB[ -]?(\d+)',  # China GB standards
-            r'CMVSS[ -]?(\d+)'  # Canadian standards
-        ]
+# Check for regulation numbers
+reg_patterns = [
+        r'[RU]N?[ -]?R?[ -]?(\d+)',  # UN R## patterns
+        r'FMVSS[ -]?(\d+)',  # FMVSS ## patterns
+        r'[EU][UC][ -]?(\d+/\d+)',  # EU regulations
+        r'GB[ -]?(\d+)',  # China GB standards
+        r'CMVSS[ -]?(\d+)'  # Canadian standards
+]
         
-        for pattern in reg_patterns:
-            reg_numbers = re.findall(pattern, query)
-            if reg_numbers:
-                for num in reg_numbers:
-                    # Check if the regulation number is in the content
-                    reg_pattern = re.compile(f"[RU]N?[ -]?R?[ -]?{num}|FMVSS[ -]?{num}|[EU][UC][ -]?{num}|GB[ -]?{num}|CMVSS[ -]?{num}", re.IGNORECASE)
-                    if reg_pattern.search(content):
-                        base_score = min(0.95, base_score + 0.3)  # Significant boost for regulation match
-                        break
-        
-        return base_score
+for pattern in reg_patterns:
+    reg_numbers = re.findall(pattern, query)
+    if reg_numbers:
+        for num in reg_numbers:
+            # Check if the regulation number is in the content
+            reg_pattern = re.compile(f"[RU]N?[ -]?R?[ -]?{num}|FMVSS[ -]?{num}|[EU][UC][ -]?{num}|GB[ -]?{num}|CMVSS[ -]?{num}", re.IGNORECASE)
+            if reg_pattern.search(content):
+                base_score = min(0.95, base_score + 0.3)  # Significant boost for regulation match
+                break
+
+return base_score
+
+def _extract_text_from_pdf_url(self, url: str) -> str:
+"""
+Extract text from a PDF URL.
+
+Args:
+    url: The URL
     
-    def _extract_text_from_pdf_url(self, url: str) -> str:
-        """
-        Extract text from a PDF URL.
-        
-        Args:
-            url: The URL
-            
-        Returns:
-            Extracted text
-        """
-        try:
-            # Download the PDF
-            response = requests.get(url, timeout=30)
-            response.raise_for_status()
-            
-            # Extract text from PDF
-            pdf_content = BytesIO(response.content)
-            
-            # Use PyPDF2 to extract text
-            text = ""
-            pdf_reader = PyPDF2.PdfReader(pdf_content)
-            
-            # Get total number of pages
-            num_pages = len(pdf_reader.pages)
-            
-            # Only process up to 20 pages to avoid huge documents
-            for page_num in range(min(num_pages, 20)):
-                page = pdf_reader.pages[page_num]
-                text += page.extract_text() + "\n\n"
-            
-            # Clean up the text
-            text = text.replace("\n\n", "\n").strip()
-            
-            return text
-        except Exception as e:
-            logger.error(f"Error extracting text from PDF URL {url}: {e}")
-            return ""
+Returns:
+    Extracted text
+"""
+try:
+    # Download the PDF
+    response = requests.get(url, timeout=30)
+    response.raise_for_status()
     
-    def _extract_text_from_html_url(self, url: str) -> str:
-        """
-        Extract text from an HTML URL.
-        
-        Args:
-            url: The URL
-            
-        Returns:
-            Extracted text
-        """
-        try:
-            # Download the HTML
-            response = requests.get(url, timeout=30)
-            response.raise_for_status()
-            
-            # Parse HTML
-            soup = BeautifulSoup(response.text, "html.parser")
-            
-            # Remove script and style elements
-            for element in soup(["script", "style"]):
-                element.extract()
-            
-            # Get text
-            text = soup.get_text()
-            
-            # Break into lines and remove leading and trailing space
-            lines = (line.strip() for line in text.splitlines())
-            
-            # Break multi-headlines into a line each
-            chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
-            
-            # Drop blank lines
-            text = '\n'.join(chunk for chunk in chunks if chunk)
-            
-            return text
-        except Exception as e:
-            logger.error(f"Error extracting text from HTML URL {url}: {e}")
-            return ""
+    # Extract text from PDF
+    pdf_content = BytesIO(response.content)
     
-    def _update_document_relevance(self, doc: Dict[str, Any], query: str, relevance_score: float = None):
-        """
-        Update document relevance in the learning database.
-        
-        Args:
-            doc: Document information
-            query: The query
-            relevance_score: Optional relevance score override
-        """
-        if not doc.get("url"):
-            return
-            
-        url = doc["url"]
-        source_id = doc.get("source_id", "unknown")
-        document_id = doc.get("document_id", "unknown")
-        
-        # Extract topics from the query
-        topics = self.extract_key_phrases(query)
-        
-        # Initialize document entry if needed
-        if url not in self.document_relevance:
-            self.document_relevance[url] = {
-                "source_id": source_id,
-                "document_id": document_id,
-                "topics": {},
-                "access_count": 1
-            }
-        else:
-            # Increment access count
-            self.document_relevance[url]["access_count"] = self.document_relevance[url].get("access_count", 0) + 1
-        
-        # Get or use provided relevance score
-        if relevance_score is None:
-            relevance_score = doc.get("relevance_score", 0.5)
-        
-        # Update topics
-        for topic in topics:
-            if topic not in self.document_relevance[url].get("topics", {}):
-                self.document_relevance[url].setdefault("topics", {})[topic] = relevance_score
-            else:
-                # Update with weighted average
-                current_score = self.document_relevance[url]["topics"][topic]
-                count = self.document_relevance[url].get("access_count", 1)
-                new_score = (current_score * (count - 1) + relevance_score) / count
-                self.document_relevance[url]["topics"][topic] = new_score
+    # Use PyPDF2 to extract text
+    text = ""
+    pdf_reader = PyPDF2.PdfReader(pdf_content)
+    
+    # Get total number of pages
+    num_pages = len(pdf_reader.pages)
+    
+    # Only process up to 20 pages to avoid huge documents
+    for page_num in range(min(num_pages, 20)):
+        page = pdf_reader.pages[page_num]
+        text += page.extract_text() + "\n\n"
+    
+    # Clean up the text
+    text = text.replace("\n\n", "\n").strip()
+    
+    return text
+except Exception as e:
+    logger.error(f"Error extracting text from PDF URL {url}: {e}")
+    return ""
+
+def _extract_text_from_html_url(self, url: str) -> str:
+"""
+Extract text from an HTML URL.
+
+Args:
+    url: The URL
+    
+Returns:
+    Extracted text
+"""
+try:
+    # Download the HTML
+    response = requests.get(url, timeout=30)
+    response.raise_for_status()
+    
+    # Parse HTML
+    soup = BeautifulSoup(response.text, "html.parser")
+    
+    # Remove script and style elements
+    for element in soup(["script", "style"]):
+        element.extract()
+    
+    # Get text
+    text = soup.get_text()
+    
+    # Break into lines and remove leading and trailing space
+    lines = (line.strip() for line in text.splitlines())
+    
+    # Break multi-headlines into a line each
+    chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+    
+    # Drop blank lines
+    text = '\n'.join(chunk for chunk in chunks if chunk)
+    
+    return text
+except Exception as e:
+    logger.error(f"Error extracting text from HTML URL {url}: {e}")
+    return ""
+
+def _update_document_relevance(self, doc: Dict[str, Any], query: str, relevance_score: float = None):
+"""
+Update document relevance in the learning database.
+
+Args:
+    doc: Document information
+    query: The query
+    relevance_score: Optional relevance score override
+"""
+if not doc.get("url"):
+    return
+    
+url = doc["url"]
+source_id = doc.get("source_id", "unknown")
+document_id = doc.get("document_id", "unknown")
+
+# Extract topics from the query
+topics = self.extract_key_phrases(query)
+
+# Initialize document entry if needed
+if url not in self.document_relevance:
+    self.document_relevance[url] = {
+        "source_id": source_id,
+        "document_id": document_id,
+        "topics": {},
+        "access_count": 1
+    }
+else:
+    # Increment access count
+    self.document_relevance[url]["access_count"] = self.document_relevance[url].get("access_count", 0) + 1
+
+# Get or use provided relevance score
+if relevance_score is None:
+    relevance_score = doc.get("relevance_score", 0.5)
+
+# Update topics
+for topic in topics:
+    if topic not in self.document_relevance[url].get("topics", {}):
+        self.document_relevance[url].setdefault("topics", {})[topic] = relevance_score
+    else:
+        # Update with weighted average
+        current_score = self.document_relevance[url]["topics"][topic]
+        count = self.document_relevance[url].get("access_count", 1)
+        new_score = (current_score * (count - 1) + relevance_score) / count
+        self.document_relevance[url]["topics"][topic] = new_score
 
 class AutoRegulationAdvisor:
-    """
-    An intelligent AI agent that provides accurate answers about automotive regulations
-    by dynamically retrieving information from regulatory websites based on user queries.
-    """
+"""
+An intelligent AI agent that provides accurate answers about automotive regulations
+by dynamically retrieving information from regulatory websites based on user queries.
+"""
+
+def __init__(self, groq_api_key: str):
+"""
+Initialize the AutoRegulationAdvisor agent.
+
+Args:
+    groq_api_key: API key for Groq
+"""
+self.groq_api_key = groq_api_key
+
+# Initialize the Groq client
+self.groq_client = GroqClient(api_key=groq_api_key)
+
+# Initialize the regulation search engine
+self.search_engine = RegulationSearchEngine(groq_client=self.groq_client)
+
+# Configuration
+self.max_documents = 5  # Maximum number of documents to retrieve per query
+self.max_context_length = 12000  # Maximum context length for LLM (in characters)
+
+def query(self, question: str) -> Dict[str, Any]:
+"""
+Query the advisor with a question about automotive regulations.
+This method dynamically retrieves information from regulatory websites
+based on the question.
+
+Args:
+    question: The question to ask
     
-    def __init__(self, groq_api_key: str):
-        """
-        Initialize the AutoRegulationAdvisor agent.
-        
-        Args:
-            groq_api_key: API key for Groq
-        """
-        self.groq_api_key = groq_api_key
-        
-        # Initialize the Groq client
-        self.groq_client = GroqClient(api_key=groq_api_key)
-        
-        # Initialize the regulation search engine
-        self.search_engine = RegulationSearchEngine(groq_client=self.groq_client)
-        
-        # Configuration
-        self.max_documents = 5  # Maximum number of documents to retrieve per query
-        self.max_context_length = 12000  # Maximum context length for LLM (in characters)
+Returns:
+    A dictionary containing the answer, sources, and confidence score
+"""
+start_time = time.time()
+
+try:
+    # Search for relevant documents
+    st.markdown("### Searching for relevant regulatory information...")
+    documents = self.search_engine.search_for_documents(question, top_n=3)
     
-    def query(self, question: str) -> Dict[str, Any]:
-        """
-        Query the advisor with a question about automotive regulations.
-        This method dynamically retrieves information from regulatory websites
-        based on the question.
-        
-        Args:
-            question: The question to ask
-            
-        Returns:
-            A dictionary containing the answer, sources, and confidence score
-        """
-        start_time = time.time()
-        
-        try:
-            # Search for relevant documents
-            st.markdown("### Searching for relevant regulatory information...")
-            documents = self.search_engine.search_for_documents(question, top_n=3)
-            
-            if not documents:
-                return {
-                    "answer": "I'm sorry, but I couldn't find any relevant automotive regulatory information for your question. Could you try rephrasing your question with more specific terms, regulation numbers, or regional requirements?",
-                    "sources": [],
-                    "confidence": 0.0,
-                    "clean_response": "No relevant regulatory information found."
-                }
-            
-            # Extract relevant sections from documents
-            st.markdown("### Analyzing regulatory documents...")
-            relevant_sections = self._extract_relevant_sections(question, documents)
-            
-            # Generate a prompt for the LLM
-            prompt = self._generate_prompt(question, relevant_sections, documents)
-            
-            # Query the LLM
-            st.markdown("### Generating response...")
-            system_prompt = """You are an expert in global automotive regulations with 30 years of experience. 
-            Your task is to provide accurate, detailed answers based solely on the provided regulatory information.
-            Include specific regulatory references and section numbers in your answer.
-            If the provided information doesn't fully answer the question, clearly state what is known and what is missing.
-            Always provide the most up-to-date information available."""
-            
-            answer = self.groq_client.generate_sync(prompt, system_prompt=system_prompt)
-            
-            # Clean the response
-            clean_response = self._clean_response(answer)
-            
-            # Calculate confidence based on document scores and answer quality
-            confidence = self._calculate_confidence(documents, answer, question)
-            
-            # Prepare the sources for the response
-            sources = []
-            for doc in documents:
-                if "url" in doc and "source_id" in doc and "document_id" in doc:
-                    source_info = {
-                        "url": doc["url"],
-                        "source_id": doc["source_id"],
-                        "document_id": doc["document_id"],
-                        "relevance_score": doc.get("relevance_score", 0.5)
-                    }
-                    sources.append(source_info)
-            
-            # Calculate response time
-            processing_time = time.time() - start_time
-            
-            return {
-                "answer": answer,
-                "sources": sources,
-                "confidence": confidence,
-                "clean_response": clean_response,
-                "processing_time": processing_time
+    if not documents:
+        return {
+            "answer": "I'm sorry, but I couldn't find any relevant automotive regulatory information for your question. Could you try rephrasing your question with more specific terms, regulation numbers, or regional requirements?",
+            "sources": [],
+            "confidence": 0.0,
+            "clean_response": "No relevant regulatory information found."
+        }
+    
+    # Extract relevant sections from documents
+    st.markdown("### Analyzing regulatory documents...")
+    relevant_sections = self._extract_relevant_sections(question, documents)
+    
+    # Generate a prompt for the LLM
+    prompt = self._generate_prompt(question, relevant_sections, documents)
+    
+    # Query the LLM
+    st.markdown("### Generating response...")
+    system_prompt = """You are an expert in global automotive regulations with 30 years of experience. 
+    Your task is to provide accurate, detailed answers based solely on the provided regulatory information.
+    Include specific regulatory references and section numbers in your answer.
+    If the provided information doesn't fully answer the question, clearly state what is known and what is missing.
+    Always provide the most up-to-date information available."""
+    
+    answer = self.groq_client.generate_sync(prompt, system_prompt=system_prompt)
+    
+    # Clean the response
+    clean_response = self._clean_response(answer)
+    
+    # Calculate confidence based on document scores and answer quality
+    confidence = self._calculate_confidence(documents, answer, question)
+    
+    # Prepare the sources for the response
+    sources = []
+    for doc in documents:
+        if "url" in doc and "source_id" in doc and "document_id" in doc:
+            source_info = {
+                "url": doc["url"],
+                "source_id": doc["source_id"],
+                "document_id": doc["document_id"],
+                "relevance_score": doc.get("relevance_score", 0.5)
             }
-            
-        except Exception as e:
-            logger.error(f"Error processing query: {e}")
-            
-            return {
-                "answer": f"I'm sorry, but I encountered an error while processing your question: {str(e)}",
-                "sources": [],
-                "confidence": 0.0,
-                "clean_response": f"Error: {str(e)}",
-                "processing_time": time.time() - start_time
-            }
+            sources.append(source_info)
     
-    def _extract_relevant_sections(self, question: str, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Extract relevant sections from documents based on the question.
-        
-        Args:
-            question: The question
-            documents: List of documents
-            
-        Returns:
-            List of relevant sections with their source information
-        """
-        relevant_sections = []
-        
-        # Extract key terms from the question
-        key_terms = self.search_engine.extract_key_phrases(question)
-        
-        for doc in documents:
-            # Skip if no content
-            if "content" not in doc or not doc["content"]:
-                continue
-            
-            content = doc["content"]
-            
-            # Split content into paragraphs
-            paragraphs = re.split(r'\n\s*\n|\r\n\s*\r\n', content)
-            
-            # For each paragraph, check relevance to the question
-            for para_idx, paragraph in enumerate(paragraphs):
-                # Skip short paragraphs
-                if len(paragraph.strip()) < 50:
-                    continue
-                
-                # Check if paragraph contains any key terms
-                if not any(term.lower() in paragraph.lower() for term in key_terms):
-                    continue
-                
-                # Calculate relevance score
-                relevance = self.search_engine._calculate_relevance_score(paragraph, question)
-                
-                if relevance > 0.4:  # Threshold for relevance
-                    # Find the section number or title if available
-                    section_title = ""
-                    
-                    # Look for section patterns like "Section 4.1" or "CHAPTER II"
-                    section_match = re.search(r'(?:Section|Chapter|Paragraph|Article|Annex)\s+[\d\w\.]+', paragraph, re.IGNORECASE)
-                    if section_match:
-                        section_title = section_match.group(0)
-                    
-                    # Add to relevant sections
-                    relevant_sections.append({
-                        "source_id": doc["source_id"],
-                        "document_id": doc.get("document_id", ""),
-                        "document_url": doc.get("url", ""),
-                        "paragraph_index": para_idx,
-                        "section_title": section_title,
-                        "excerpt": paragraph.strip(),
-                        "relevance": relevance
-                    })
-        
-        # Sort by relevance
-        relevant_sections.sort(key=lambda x: x["relevance"], reverse=True)
-        
-        # Limit to avoid context length issues
-        total_length = 0
-        filtered_sections = []
-        
-        for section in relevant_sections:
-            section_length = len(section["excerpt"])
-            if total_length + section_length <= self.max_context_length:
-                filtered_sections.append(section)
-                total_length += section_length
-            else:
-                # If we can't fit any more full sections, break
-                break
-        
-        return filtered_sections
+    # Calculate response time
+    processing_time = time.time() - start_time
     
-    def _generate_prompt(self, question: str, relevant_sections: List[Dict[str, Any]], 
-                        documents: List[Dict[str, Any]]) -> str:
-        """
-        Generate a prompt for the LLM based on the question and relevant sections.
+    return {
+        "answer": answer,
+        "sources": sources,
+        "confidence": confidence,
+        "clean_response": clean_response,
+        "processing_time": processing_time
+    }
+    
+except Exception as e:
+    logger.error(f"Error processing query: {e}")
+    
+    return {
+        "answer": f"I'm sorry, but I encountered an error while processing your question: {str(e)}",
+        "sources": [],
+        "confidence": 0.0,
+        "clean_response": f"Error: {str(e)}",
+        "processing_time": time.time() - start_time
+    }
+
+def _extract_relevant_sections(self, question: str, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+"""
+Extract relevant sections from documents based on the question.
+
+Args:
+    question: The question
+    documents: List of documents
+    
+Returns:
+    List of relevant sections with their source information
+"""
+relevant_sections = []
+
+# Extract key terms from the question
+key_terms = self.search_engine.extract_key_phrases(question)
+
+for doc in documents:
+    # Skip if no content
+    if "content" not in doc or not doc["content"]:
+        continue
+    
+    content = doc["content"]
+    
+    # Split content into paragraphs
+    paragraphs = re.split(r'\n\s*\n|\r\n\s*\r\n', content)
+    
+    # For each paragraph, check relevance to the question
+    for para_idx, paragraph in enumerate(paragraphs):
+        # Skip short paragraphs
+        if len(paragraph.strip()) < 50:
+            continue
         
-        Args:
-            question: The question to ask
-            relevant_sections: List of relevant sections
-            documents: Original documents information
-            
-        Returns:
-            The generated prompt
-        """
-        prompt = f"Question about automotive regulations: {question}\n\n"
-        prompt += "Here are the relevant sections from regulatory documents:\n\n"
+        # Check if paragraph contains any key terms
+        if not any(term.lower() in paragraph.lower() for term in key_terms):
+            continue
         
-        # Add relevant sections with source information
-        for i, section in enumerate(relevant_sections):
-            source_id = section["source_id"]
-            reg_body_name = next((body_info["name"] for body_id, body_info in 
-                                self.search_engine.regulatory_bodies.items() 
-                                if body_id == source_id), source_id)
-            
-            prompt += f"Section {i+1} - Source: {reg_body_name}"
-            
-            if section["section_title"]:
-                prompt += f", {section['section_title']}"
-            
-            if section["document_url"]:
-                prompt += f"\nURL: {section['document_url']}"
-            
-            prompt += f"\n{section['excerpt']}\n\n"
+        # Calculate relevance score
+        relevance = self.search_engine._calculate_relevance_score(paragraph, question)
         
-        # Add instructions for the response
-        prompt += """
+        if relevance > 0.4:  # Threshold for relevance
+            # Find the section number or title if available
+            section_title = ""
+            
+            # Look for section patterns like "Section 4.1" or "CHAPTER II"
+            section_match = re.search(r'(?:Section|Chapter|Paragraph|Article|Annex)\s+[\d\w\.]+', paragraph, re.IGNORECASE)
+            if section_match:
+                section_title = section_match.group(0)
+            
+            # Add to relevant sections
+            relevant_sections.append({
+                "source_id": doc["source_id"],
+                "document_id": doc.get("document_id", ""),
+                "document_url": doc.get("url", ""),
+                "paragraph_index": para_idx,
+                "section_title": section_title,
+                "excerpt": paragraph.strip(),
+                "relevance": relevance
+            })
+
+# Sort by relevance
+relevant_sections.sort(key=lambda x: x["relevance"], reverse=True)
+
+# Limit to avoid context length issues
+total_length = 0
+filtered_sections = []
+
+for section in relevant_sections:
+    section_length = len(section["excerpt"])
+    if total_length + section_length <= self.max_context_length:
+        filtered_sections.append(section)
+        total_length += section_length
+    else:
+        # If we can't fit any more full sections, break
+        break
+
+return filtered_sections
+
+def _generate_prompt(self, question: str, relevant_sections: List[Dict[str, Any]], 
+                documents: List[Dict[str, Any]]) -> str:
+"""
+Generate a prompt for the LLM based on the question and relevant sections.
+
+Args:
+    question: The question to ask
+    relevant_sections: List of relevant sections
+    documents: Original documents information
+    
+Returns:
+    The generated prompt
+"""
+prompt = f"Question about automotive regulations: {question}\n\n"
+prompt += "Here are the relevant sections from regulatory documents:\n\n"
+
+# Add relevant sections with source information
+for i, section in enumerate(relevant_sections):
+    source_id = section["source_id"]
+    reg_body_name = next((body_info["name"] for body_id, body_info in 
+                        self.search_engine.regulatory_bodies.items() 
+                        if body_id == source_id), source_id)
+    
+    prompt += f"Section {i+1} - Source: {reg_body_name}"
+    
+    if section["section_title"]:
+        prompt += f", {section['section_title']}"
+    
+    if section["document_url"]:
+        prompt += f"\nURL: {section['document_url']}"
+    
+    prompt += f"\n{section['excerpt']}\n\n"
+
+# Add instructions for the response
+prompt += """
 Based only on the regulatory information provided above, please answer the question comprehensively.
 
 Please include:
