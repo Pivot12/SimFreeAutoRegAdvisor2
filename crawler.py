@@ -110,6 +110,10 @@ class AutoRegulationCrawler:
         Fetch the content of a URL with proper headers and rate limiting.
         Returns the HTML content or None if unsuccessful.
         """
+        # Ensure URL has scheme
+        if not url.startswith(('http://', 'https://')):
+            url = 'https://' + url
+            
         parsed_url = urlparse(url)
         domain = parsed_url.netloc
         
@@ -146,6 +150,15 @@ class AutoRegulationCrawler:
                     response.encoding = detected['encoding']
                 
                 return response.text
+            elif response.status_code in [301, 302, 303, 307, 308]:
+                # Handle redirects explicitly if requests doesn't
+                if 'Location' in response.headers:
+                    redirect_url = response.headers['Location']
+                    # Handle relative URLs
+                    if not redirect_url.startswith(('http://', 'https://')):
+                        redirect_url = urljoin(url, redirect_url)
+                    self.logger.log_event("redirect", {"from": url, "to": redirect_url})
+                    return self.fetch_url(redirect_url)
             else:
                 self.logger.log_error(f"HTTP error {response.status_code} for URL: {url}")
                 return None
@@ -340,6 +353,10 @@ class AutoRegulationCrawler:
         """
         documents = []
         
+        # Ensure URL has scheme
+        if not base_url.startswith(('http://', 'https://')):
+            base_url = 'https://' + base_url
+        
         # Step 1: Fetch the base URL to find document links
         html_content = self.fetch_url(base_url)
         if not html_content:
@@ -348,10 +365,32 @@ class AutoRegulationCrawler:
         
         if not html_content:
             self.logger.log_error(f"Failed to fetch base URL: {base_url}")
-            return documents
+            
+            # If the base URL fails, try some alternative paths
+            alt_paths = self._generate_alternative_paths(base_url, query_analysis)
+            
+            for alt_url in alt_paths:
+                self.logger.log_event("trying_alternative_url", {"url": alt_url})
+                html_content = self.fetch_url(alt_url)
+                if html_content:
+                    base_url = alt_url  # Update the base URL to the successful one
+                    break
+                
+                # Try with headless browser
+                html_content = self.fetch_with_browser(alt_url)
+                if html_content:
+                    base_url = alt_url
+                    break
+            
+            if not html_content:
+                return documents
         
         # Step 2: Find links to regulation documents
         doc_links = self.find_document_links(html_content, base_url, doc_patterns)
+        
+        # If no links found with the patterns, try to find any potentially regulatory links
+        if not doc_links:
+            doc_links = self._find_potential_regulation_links(html_content, base_url, query_analysis)
         
         # Step 3: Filter links based on query analysis
         filtered_links = self._filter_links_by_relevance(doc_links, query_analysis)
@@ -381,6 +420,110 @@ class AutoRegulationCrawler:
                 })
         
         return documents
+    
+    def _generate_alternative_paths(self, base_url: str, query_analysis: Dict) -> List[str]:
+        """Generate alternative paths to try if the main URL fails."""
+        alt_paths = []
+        parsed_url = urlparse(base_url)
+        domain = parsed_url.netloc
+        scheme = parsed_url.scheme or "https"
+        
+        # Try the main domain
+        alt_paths.append(f"{scheme}://{domain}")
+        
+        # Try common regulatory paths
+        common_paths = [
+            "/regulations", 
+            "/standards", 
+            "/automotive", 
+            "/vehicles", 
+            "/transport", 
+            "/motor-vehicles",
+            "/safety",
+            "/homologation",
+            "/type-approval",
+            "/certification",
+            "/en", # English version
+            "/english"
+        ]
+        
+        for path in common_paths:
+            alt_paths.append(f"{scheme}://{domain}{path}")
+        
+        # Try paths based on vehicle categories
+        if "vehicle_categories" in query_analysis:
+            for category in query_analysis["vehicle_categories"]:
+                if category.lower() not in ["all", "general"]:
+                    alt_paths.append(f"{scheme}://{domain}/{category.lower()}")
+        
+        # Try paths based on regulation types
+        if "regulation_types" in query_analysis:
+            for reg_type in query_analysis["regulation_types"]:
+                if reg_type.lower() not in ["general"]:
+                    alt_paths.append(f"{scheme}://{domain}/{reg_type.lower()}")
+        
+        return alt_paths
+    
+    def _find_potential_regulation_links(self, html_content: str, base_url: str, query_analysis: Dict) -> List[Dict]:
+        """Find potentially relevant regulatory links when standard patterns fail."""
+        if not html_content:
+            return []
+        
+        soup = BeautifulSoup(html_content, 'html.parser')
+        links = []
+        
+        # Keywords that suggest regulatory content
+        reg_keywords = [
+            "regulation", "standard", "directive", "law", "rule", "requirement",
+            "certification", "homologation", "type-approval", "compliance", 
+            "safety", "emission", "vehicle", "automotive"
+        ]
+        
+        # Add specific keywords from query
+        if "regulation_types" in query_analysis:
+            reg_keywords.extend([rt.lower() for rt in query_analysis["regulation_types"] 
+                                if rt.lower() not in ["general"]])
+        
+        if "vehicle_categories" in query_analysis:
+            reg_keywords.extend([vc.lower() for vc in query_analysis["vehicle_categories"]
+                               if vc.lower() not in ["all", "general"]])
+            
+        if "technical_parameters" in query_analysis:
+            reg_keywords.extend([tp.lower() for tp in query_analysis["technical_parameters"]])
+        
+        # Find all links
+        for link in soup.find_all('a', href=True):
+            href = link['href']
+            absolute_url = urljoin(base_url, href)
+            link_text = link.get_text().strip().lower()
+            
+            # Check if link contains regulatory keywords
+            if any(keyword in link_text for keyword in reg_keywords) or \
+               any(keyword in href.lower() for keyword in reg_keywords):
+                
+                title = link.get_text().strip()
+                if not title:
+                    # Try to get title from parent element
+                    parent = link.parent
+                    if parent:
+                        title = parent.get_text().strip()
+                
+                # If still no title, use the URL
+                if not title:
+                    title = os.path.basename(absolute_url)
+                
+                # Check for PDF or document links
+                is_document = False
+                if absolute_url.lower().endswith(('.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx')):
+                    is_document = True
+                
+                links.append({
+                    "title": title,
+                    "url": absolute_url,
+                    "is_document": is_document
+                })
+        
+        return links
     
     def _filter_links_by_relevance(self, links: List[Dict], query_analysis: Dict) -> List[Dict]:
         """Filter document links by relevance to the query."""
