@@ -83,12 +83,22 @@ with st.sidebar:
     This AI assistant uses RAG (Retrieval Augmented Generation) to provide accurate answers about automotive regulations.
     
     It searches across official regulatory websites including:
-    - 🇺🇸 US NHTSA
-    - 🇪🇺 European Union Regulations
-    - 🇬🇧 UK DVLA
+    - 🇺🇸 US NHTSA & EPA
+    - 🇪🇺 European Union Regulations & ACEA
+    - 🇬🇧 UK Department for Transport
     - 🌎 UN ECE Standards
     - 🇨🇳 China MIIT
     - 🇯🇵 Japan MLIT
+    - 🇮🇳 India ARAI & CMVR
+    - 🇨🇦 Canada Transport
+    - 🇦🇺 Australia Vehicle Standards
+    - 🇧🇷 Brazil INMETRO
+    - 🇰🇷 South Korea MOLIT
+    - 🇷🇺 Russia Rosavtodor
+    - 🇲🇽 Mexico SCT
+    - 🇿🇦 South Africa NRCS
+    - 🇦🇷 Argentina ANSV
+    - 🌐 ISO & IEC Standards
     
     All answers are based only on official regulatory documents.
     """)
