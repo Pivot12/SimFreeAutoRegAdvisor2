@@ -6,7 +6,6 @@ from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 import requests
 from dotenv import load_dotenv
-from groq import Groq
 import numpy as np
 from crawler import AutoRegulationCrawler
 from vector_store import VectorStore
@@ -27,13 +26,11 @@ class AutoRegulationsAgent:
     def __init__(self):
         # Initialize API client
         self.groq_api_key = os.getenv("GROQ_API_KEY")
-        try:
-            # Try the simple initialization first
-            self.groq_client = Groq(api_key=self.groq_api_key)
-        except TypeError:
-            # If that fails, try with the base_url parameter (for newer versions)
-            self.groq_client = Groq(api_key=self.groq_api_key, base_url="https://api.groq.com/openai/v1")
         self.model = os.getenv("LLAMA_MODEL", "llama3-70b-8192")
+        
+        # We'll implement direct API calls instead of using the Groq client
+        # to avoid compatibility issues
+        self.groq_client = None
         
         # Initialize components
         self.crawler = AutoRegulationCrawler()
@@ -174,36 +171,55 @@ ANSWER:""",
     def _analyze_query(self, query: str) -> Dict:
         """Analyze the user query to determine what regulations to search for."""
         try:
-            # Use Groq API to analyze the query
+            # Use direct API call to Groq to analyze the query
             prompt = self.mcp_config["prompt_templates"]["query_analysis"].format(query=query)
             
-            response = self.groq_client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "You are an automotive regulations expert who helps analyze queries to determine what specific regulations should be searched for."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.1,
-                max_tokens=500
+            headers = {
+                "Authorization": f"Bearer {self.groq_api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            response = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers=headers,
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": "You are an automotive regulations expert who helps analyze queries to determine what specific regulations should be searched for."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": 0.1,
+                    "max_tokens": 500
+                }
             )
             
-            analysis = response.choices[0].message.content
+            if response.status_code != 200:
+                raise Exception(f"API error: {response.status_code} - {response.text}")
+                
+            analysis = response.json()["choices"][0]["message"]["content"]
             
             # Extract structured information using another call
             extraction_prompt = f"Extract the following information from this analysis into a JSON format:\n\n{analysis}\n\nOutput a JSON object with keys: regions, regulation_types, vehicle_categories, timeframe, technical_parameters"
             
-            extraction_response = self.groq_client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant that extracts structured information into clean JSON."},
-                    {"role": "user", "content": extraction_prompt}
-                ],
-                temperature=0.1,
-                max_tokens=500
+            extraction_response = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers=headers,
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": "You are a helpful assistant that extracts structured information into clean JSON."},
+                        {"role": "user", "content": extraction_prompt}
+                    ],
+                    "temperature": 0.1,
+                    "max_tokens": 500
+                }
             )
             
+            if extraction_response.status_code != 200:
+                raise Exception(f"API error: {extraction_response.status_code} - {extraction_response.text}")
+                
             # Parse the JSON output
-            structured_analysis = json.loads(extraction_response.choices[0].message.content)
+            structured_analysis = json.loads(extraction_response.json()["choices"][0]["message"]["content"])
             return structured_analysis
             
         except Exception as e:
@@ -361,7 +377,7 @@ ANSWER:""",
         query_embedding = self._get_embeddings(query)
         relevant_chunks = self.vector_store.find_relevant_chunks(query_embedding, all_chunks)
         
-        # Step 5: Generate response using Groq API
+        # Step 5: Generate response using Groq API directly
         context = "\n\n".join([f"Document: {chunk['text']}\nSource: {chunk['source']}" for chunk in relevant_chunks])
         prompt = self.mcp_config["prompt_templates"]["response_generation"].format(
             query=query,
@@ -369,17 +385,29 @@ ANSWER:""",
         )
         
         try:
-            response = self.groq_client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "You are an automotive regulations expert with 30 years of experience. Provide accurate, detailed answers about automotive regulations based ONLY on the sources provided."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.2,
-                max_tokens=2000
+            headers = {
+                "Authorization": f"Bearer {self.groq_api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            response = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers=headers,
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": "You are an automotive regulations expert with 30 years of experience. Provide accurate, detailed answers about automotive regulations based ONLY on the sources provided."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": 0.2,
+                    "max_tokens": 2000
+                }
             )
             
-            generated_response = response.choices[0].message.content
+            if response.status_code != 200:
+                raise Exception(f"API error: {response.status_code} - {response.text}")
+                
+            generated_response = response.json()["choices"][0]["message"]["content"]
             
             # Add citation references
             formatted_response = self._add_citations(generated_response, source_documents)
