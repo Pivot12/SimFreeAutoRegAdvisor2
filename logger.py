@@ -101,14 +101,17 @@ class Logger:
         timestamp = datetime.now().isoformat()
         user_id = self._get_user_id()
         
-        self.queries_df = self.queries_df.append({
+        # Create a new row as a DataFrame and concat instead of using append
+        new_row = pd.DataFrame([{
             "query_id": query_id,
             "timestamp": timestamp,
             "query_text": query_text,
             "user_id": user_id,
             "processing_time": None,  # Will be updated later
             "success": None  # Will be updated later
-        }, ignore_index=True)
+        }])
+        
+        self.queries_df = pd.concat([self.queries_df, new_row], ignore_index=True)
         
         self.entry_count += 1
         if self.entry_count >= self.save_threshold:
@@ -122,13 +125,16 @@ class Logger:
         error_id = hashlib.md5(f"{datetime.now().isoformat()}-{error_message}".encode()).hexdigest()[:12]
         timestamp = datetime.now().isoformat()
         
-        self.errors_df = self.errors_df.append({
+        # Create a new row as a DataFrame and concat instead of using append
+        new_row = pd.DataFrame([{
             "error_id": error_id,
             "timestamp": timestamp,
             "error_type": error_type,
             "error_message": error_message,
             "query_id": self.current_query_id
-        }, ignore_index=True)
+        }])
+        
+        self.errors_df = pd.concat([self.errors_df, new_row], ignore_index=True)
         
         self.logger.error(f"Error: {error_message}")
         
@@ -152,14 +158,17 @@ class Logger:
         user_id = self._get_user_id()
         feedback_id = hashlib.md5(f"{timestamp}-{query_id}-{score}".encode()).hexdigest()[:12]
         
-        self.feedback_df = self.feedback_df.append({
+        # Create a new row as a DataFrame and concat instead of using append
+        new_row = pd.DataFrame([{
             "feedback_id": feedback_id,
             "timestamp": timestamp,
             "query_id": query_id,
             "user_id": user_id,
             "score": score,
             "comments": comments
-        }, ignore_index=True)
+        }])
+        
+        self.feedback_df = pd.concat([self.feedback_df, new_row], ignore_index=True)
         
         self.logger.info(f"Feedback logged: {score} for query {query_id}")
         
@@ -181,14 +190,17 @@ class Logger:
                 self.queries_df.loc[query_mask, "success"] = success
         
         # Also add to performance dataframe for time series analysis
-        self.performance_df = self.performance_df.append({
+        # Create a new row as a DataFrame and concat instead of using append
+        new_row = pd.DataFrame([{
             "timestamp": timestamp,
             "processing_time": processing_time,
             "query_id": self.current_query_id,
             "success": success,
             "num_sources": num_sources,
             "num_chunks": num_chunks
-        }, ignore_index=True)
+        }])
+        
+        self.performance_df = pd.concat([self.performance_df, new_row], ignore_index=True)
         
         self.logger.info(f"Performance logged: {processing_time:.2f}s, success={success}")
         
@@ -205,13 +217,16 @@ class Logger:
         # Convert dict to JSON string
         event_data_json = json.dumps(event_data)
         
-        self.events_df = self.events_df.append({
+        # Create a new row as a DataFrame and concat instead of using append
+        new_row = pd.DataFrame([{
             "event_id": event_id,
             "timestamp": timestamp,
             "event_type": event_type,
             "event_data": event_data_json,
             "query_id": self.current_query_id
-        }, ignore_index=True)
+        }])
+        
+        self.events_df = pd.concat([self.events_df, new_row], ignore_index=True)
         
         self.logger.info(f"Event logged: {event_type}")
         
