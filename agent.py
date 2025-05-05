@@ -2,6 +2,7 @@ import os
 import time
 import json
 import hashlib
+import re
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 import requests
@@ -516,5 +517,3 @@ ANSWER:""",
             "high_rated_queries": len(high_rated_queries),
             "source_success_rates": source_success_rates
         })
-    
-import re  # Add this import at the top of the file
