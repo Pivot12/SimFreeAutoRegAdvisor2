@@ -173,6 +173,12 @@ class AutoRegulationCrawler:
         Returns the HTML content or None if unsuccessful.
         """
         try:
+            # Skip playwright browser fetching if it's not installed
+            # This avoids the installation errors in deployed environments
+            return None
+            
+            # Original implementation commented out to avoid Playwright issues
+            """
             with sync_playwright() as playwright:
                 browser = playwright.chromium.launch(headless=True)
                 context = browser.new_context(
@@ -215,6 +221,7 @@ class AutoRegulationCrawler:
                 browser.close()
                 
                 return content
+            """
                 
         except Exception as e:
             self.logger.log_error(f"Browser fetch error for {url}: {str(e)}")
@@ -346,11 +353,19 @@ class AutoRegulationCrawler:
         
         return "Unknown Document"
     
-    def retrieve_documents(self, base_url: str, doc_patterns: List[str], query_analysis: Dict) -> List[Dict]:
+    def retrieve_documents_with_timeout(self, base_url: str, doc_patterns: List[str], query_analysis: Dict, timeout: int = 10) -> List[Dict]:
         """
-        Retrieve relevant documents from a regulatory source.
+        Retrieve relevant documents from a regulatory source with a timeout.
         Returns list of dictionaries with title, URL and content.
+        
+        Args:
+            base_url: The base URL to start from
+            doc_patterns: List of URL patterns to look for
+            query_analysis: Analysis of the user query
+            timeout: Maximum time in seconds to spend on this source
         """
+        start_time = time.time()
+        end_time = start_time + timeout
         documents = []
         
         # Ensure URL has scheme
@@ -359,9 +374,10 @@ class AutoRegulationCrawler:
         
         # Step 1: Fetch the base URL to find document links
         html_content = self.fetch_url(base_url)
-        if not html_content:
-            # Try with headless browser if regular fetch fails
-            html_content = self.fetch_with_browser(base_url)
+        
+        # Skip browser fetch to avoid Playwright issues
+        # if not html_content:
+        #     html_content = self.fetch_with_browser(base_url)
         
         if not html_content:
             self.logger.log_error(f"Failed to fetch base URL: {base_url}")
@@ -369,18 +385,23 @@ class AutoRegulationCrawler:
             # If the base URL fails, try some alternative paths
             alt_paths = self._generate_alternative_paths(base_url, query_analysis)
             
-            for alt_url in alt_paths:
+            for alt_url in alt_paths[:3]:  # Limit to top 3 alternatives for speed
+                # Check timeout
+                if time.time() > end_time:
+                    self.logger.log_event("timeout", {"phase": "alt_url_fetch"})
+                    break
+                    
                 self.logger.log_event("trying_alternative_url", {"url": alt_url})
                 html_content = self.fetch_url(alt_url)
                 if html_content:
                     base_url = alt_url  # Update the base URL to the successful one
                     break
                 
-                # Try with headless browser
-                html_content = self.fetch_with_browser(alt_url)
-                if html_content:
-                    base_url = alt_url
-                    break
+                # Skip browser fetch to avoid Playwright issues
+                # html_content = self.fetch_with_browser(alt_url)
+                # if html_content:
+                #     base_url = alt_url
+                #     break
             
             if not html_content:
                 return documents
@@ -389,22 +410,28 @@ class AutoRegulationCrawler:
         doc_links = self.find_document_links(html_content, base_url, doc_patterns)
         
         # If no links found with the patterns, try to find any potentially regulatory links
-        if not doc_links:
+        if not doc_links and time.time() <= end_time:
             doc_links = self._find_potential_regulation_links(html_content, base_url, query_analysis)
         
         # Step 3: Filter links based on query analysis
         filtered_links = self._filter_links_by_relevance(doc_links, query_analysis)
         
         # Step 4: Retrieve document content
-        for link in filtered_links[:5]:  # Limit to top 5 most relevant docs
+        for link in filtered_links[:3]:  # Limit to top 3 most relevant docs for speed
+            # Check timeout
+            if time.time() > end_time:
+                self.logger.log_event("timeout", {"phase": "document_content_fetch"})
+                break
+                
             content = None
             
             if link["is_document"] and link["url"].lower().endswith('.pdf'):
                 content = self.fetch_pdf(link["url"])
             else:
                 content = self.fetch_url(link["url"])
-                if not content:
-                    content = self.fetch_with_browser(link["url"])
+                # Skip browser fetch to avoid Playwright issues
+                # if not content:
+                #     content = self.fetch_with_browser(link["url"])
             
             if content:
                 # Get or extract title
