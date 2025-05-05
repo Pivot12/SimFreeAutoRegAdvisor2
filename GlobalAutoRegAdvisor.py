@@ -9,13 +9,46 @@ from dotenv import load_dotenv
 from agent import AutoRegulationsAgent
 from logger import Logger
 
-# Load environment variables
-load_dotenv()
+# Load environment variables - ensure we look in the current directory
+load_dotenv(override=True)
 
-# Check if Groq API key is set
-if not os.getenv("GROQ_API_KEY"):
-    st.error("⚠️ GROQ_API_KEY is not set. Please set it in your .env file or environment variables.")
-    st.stop()
+# Debug information about environment variables
+st.sidebar.expander("Debug Info", expanded=False).write(f"""
+- Environment variables loaded: {os.path.exists('.env')}
+- Current directory: {os.getcwd()}
+- GROQ_API_KEY set: {"Yes" if os.getenv("GROQ_API_KEY") else "No"}
+""")
+
+# Try to get the API key from multiple sources
+groq_api_key = os.getenv("GROQ_API_KEY")
+
+# If not in environment, check for an api_key.txt file
+if not groq_api_key and os.path.exists("api_key.txt"):
+    with open("api_key.txt", "r") as f:
+        groq_api_key = f.read().strip()
+    # Set it in the environment for other modules
+    os.environ["GROQ_API_KEY"] = groq_api_key
+
+# Allow direct input in the app if still not found
+if not groq_api_key:
+    st.warning("⚠️ GROQ_API_KEY not found in environment variables or api_key.txt")
+    with st.expander("Enter Groq API Key", expanded=True):
+        input_key = st.text_input("Enter your Groq API Key:", type="password")
+        if input_key:
+            groq_api_key = input_key
+            # Set it in the environment for other modules
+            os.environ["GROQ_API_KEY"] = groq_api_key
+            st.success("API Key set! You can now use the app.")
+        else:
+            st.info("You need to provide a Groq API Key to use this application. Get one from https://console.groq.com/")
+            st.write("""
+            **Where to put your API key:**
+            1. Create a file named `.env` in the application directory with content: `GROQ_API_KEY="your_key_here"`
+            2. Or create a file named `api_key.txt` with just your API key
+            3. Or enter it directly above
+            """)
+            st.stop()
+
 
 # Initialize the agent and logger
 @st.cache_resource
