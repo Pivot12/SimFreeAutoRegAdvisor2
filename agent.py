@@ -65,39 +65,129 @@ class AutoRegulationsAgent:
         return {
             "us_nhtsa": {
                 "name": "US National Highway Traffic Safety Administration",
-                "base_url": "https://www.nhtsa.gov/laws-regulations",
-                "doc_patterns": ["/fmvss", "/regulations"],
+                "base_url": "https://www.nhtsa.gov",
+                "doc_patterns": ["/laws-regulations", "/fmvss", "/regulations"],
+                "country": "USA"
+            },
+            "us_epa": {
+                "name": "US Environmental Protection Agency - Vehicle Regulations",
+                "base_url": "https://www.epa.gov/vehicle-and-engine-certification",
+                "doc_patterns": ["/regulations-standards", "/compliance-information"],
                 "country": "USA"
             },
             "eu_regulations": {
                 "name": "European Union Vehicle Regulations",
-                "base_url": "https://eur-lex.europa.eu",
-                "doc_patterns": ["/legal-content/EN/TXT/", "/legal-content/EN/ALL/"],
+                "base_url": "https://ec.europa.eu/transport/home_en",
+                "doc_patterns": ["/legal-content/EN/TXT/", "/legal-content/EN/ALL/", "/transport/road-safety/"],
                 "country": "EU"
             },
-            "uk_dvla": {
-                "name": "UK Driver & Vehicle Licensing Agency",
-                "base_url": "https://www.gov.uk/government/organisations/driver-and-vehicle-licensing-agency",
-                "doc_patterns": ["/guidance/", "/government/publications/"],
+            "efta": {
+                "name": "European Free Trade Association - Vehicle Regulations",
+                "base_url": "https://www.efta.int/eea/eea-legal-order/transport",
+                "doc_patterns": ["/eea-legal-order", "/publications"],
+                "country": "EU"
+            },
+            "uk_dft": {
+                "name": "UK Department for Transport",
+                "base_url": "https://www.gov.uk/government/organisations/department-for-transport",
+                "doc_patterns": ["/guidance/", "/government/publications/", "/vehicle-approval"],
                 "country": "UK"
             },
             "un_ece": {
                 "name": "UN Economic Commission for Europe",
                 "base_url": "https://unece.org/transport/vehicle-regulations",
-                "doc_patterns": ["/wp29/", "/standards/"],
+                "doc_patterns": ["/wp29/", "/standards/", "/transport/main/wp29/wp29regs"],
                 "country": "International"
+            },
+            "iso_vehicles": {
+                "name": "International Organization for Standardization - Road Vehicles",
+                "base_url": "https://www.iso.org/committee/45306.html",
+                "doc_patterns": ["/standards-catalogue/", "/committee/", "/standards/"],
+                "country": "International"
+            },
+            "iec_vehicles": {
+                "name": "International Electrotechnical Commission - Road Vehicles",
+                "base_url": "https://www.iec.ch/standardsdev/publications/standards.htm",
+                "doc_patterns": ["/standardsdev/", "/publications/", "/iec61851/"],
+                "country": "International"
+            },
+            "acea": {
+                "name": "European Automobile Manufacturers' Association",
+                "base_url": "https://www.acea.auto/publications/",
+                "doc_patterns": ["/publications/", "/regulatory-guide/", "/facts/"],
+                "country": "EU"
             },
             "china_miit": {
                 "name": "China Ministry of Industry and Information Technology",
                 "base_url": "http://www.miit.gov.cn",
-                "doc_patterns": ["/n1146295/", "/policy/"],
+                "doc_patterns": ["/n1146295/", "/policy/", "/gongzuo/"],
                 "country": "China"
             },
             "japan_mlit": {
                 "name": "Japan Ministry of Land, Infrastructure, Transport and Tourism",
-                "base_url": "https://www.mlit.go.jp",
-                "doc_patterns": ["/jidosha/", "/technical/"],
+                "base_url": "https://www.mlit.go.jp/en/road/index.html",
+                "doc_patterns": ["/jidosha/", "/technical/", "/road/"],
                 "country": "Japan"
+            },
+            "india_arai": {
+                "name": "Automotive Research Association of India",
+                "base_url": "https://www.araiindia.com",
+                "doc_patterns": ["/standards/", "/certification/", "/regulations/"],
+                "country": "India"
+            },
+            "india_cmvr": {
+                "name": "Central Motor Vehicle Rules (India)",
+                "base_url": "https://www.morth.nic.in",
+                "doc_patterns": ["/cmvr/", "/motor-vehicles-act/", "/regulatory/"],
+                "country": "India"
+            },
+            "canada_tc": {
+                "name": "Transport Canada - Motor Vehicle Safety",
+                "base_url": "https://tc.canada.ca/en/road-transportation/motor-vehicle-safety",
+                "doc_patterns": ["/road-transportation/", "/motor-vehicle-safety-regulations", "/standards/"],
+                "country": "Canada"
+            },
+            "australia_vs": {
+                "name": "Australia Vehicle Standards",
+                "base_url": "https://www.infrastructure.gov.au/vehicles/vehicle-standards",
+                "doc_patterns": ["/vehicles/", "/standards/", "/adrs/"],
+                "country": "Australia"
+            },
+            "brazil_inmetro": {
+                "name": "Brazil National Institute of Metrology, Quality and Technology",
+                "base_url": "https://www.gov.br/inmetro/pt-br",
+                "doc_patterns": ["/pt-br/", "/regulamentos/", "/normas/"],
+                "country": "Brazil"
+            },
+            "korea_molit": {
+                "name": "South Korea Ministry of Land, Infrastructure and Transport",
+                "base_url": "https://www.molit.go.kr/english/",
+                "doc_patterns": ["/english/", "/USR/", "/auto/"],
+                "country": "South Korea"
+            },
+            "russia_rosavtodor": {
+                "name": "Russia Federal Road Agency (Rosavtodor)",
+                "base_url": "https://www.rosavtodor.ru/en/",
+                "doc_patterns": ["/en/", "/activities/", "/docs/"],
+                "country": "Russia"
+            },
+            "mexico_sct": {
+                "name": "Mexico Secretariat of Communications and Transportation",
+                "base_url": "https://www.gob.mx/sct",
+                "doc_patterns": ["/sct/", "/documentos/", "/normas/"],
+                "country": "Mexico"
+            },
+            "southafrica_nrcs": {
+                "name": "South Africa National Regulator for Compulsory Specifications",
+                "base_url": "https://www.nrcs.org.za/",
+                "doc_patterns": ["/sabs/", "/automotive/", "/standards/"],
+                "country": "South Africa"
+            },
+            "argentina_ansv": {
+                "name": "Argentina National Road Safety Agency",
+                "base_url": "https://www.ansv.gob.ar/",
+                "doc_patterns": ["/normativa/", "/reglamentos/", "/seguridad-vial/"],
+                "country": "Argentina"
             }
         }
     
