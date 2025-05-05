@@ -27,7 +27,12 @@ class AutoRegulationsAgent:
     def __init__(self):
         # Initialize API client
         self.groq_api_key = os.getenv("GROQ_API_KEY")
-        self.groq_client = Groq(api_key=self.groq_api_key)
+        try:
+            # Try the simple initialization first
+            self.groq_client = Groq(api_key=self.groq_api_key)
+        except TypeError:
+            # If that fails, try with the base_url parameter (for newer versions)
+            self.groq_client = Groq(api_key=self.groq_api_key, base_url="https://api.groq.com/openai/v1")
         self.model = os.getenv("LLAMA_MODEL", "llama3-70b-8192")
         
         # Initialize components
@@ -126,33 +131,42 @@ ANSWER:""",
     def _get_embeddings(self, text: str) -> List[float]:
         """Generate embeddings for the given text using Groq API."""
         try:
-            # Using the embedding endpoint
-            endpoint = "https://api.groq.com/openai/v1/embeddings"
-            headers = {
-                "Authorization": f"Bearer {self.groq_api_key}",
-                "Content-Type": "application/json"
-            }
-            
-            response = requests.post(
-                endpoint,
-                headers=headers,
-                json={
-                    "model": "llama3-embedding-v1",
-                    "input": text
+            # Try using the client's embedding method if available
+            try:
+                # Modern Groq client approach
+                response = self.groq_client.embeddings.create(
+                    model="llama3-embedding-v1",
+                    input=text
+                )
+                embedding = response.data[0].embedding
+            except (AttributeError, TypeError):
+                # Fallback to direct API call if client method not available
+                endpoint = "https://api.groq.com/openai/v1/embeddings"
+                headers = {
+                    "Authorization": f"Bearer {self.groq_api_key}",
+                    "Content-Type": "application/json"
                 }
-            )
-            
-            if response.status_code == 200:
+                
+                response = requests.post(
+                    endpoint,
+                    headers=headers,
+                    json={
+                        "model": "llama3-embedding-v1",
+                        "input": text
+                    }
+                )
+                
+                if response.status_code != 200:
+                    raise Exception(f"API error: {response.status_code} - {response.text}")
+                    
                 embedding = response.json()["data"][0]["embedding"]
-                # Normalize the embedding if needed
-                if self.mcp_config["embeddings_config"]["normalize"]:
-                    norm = np.linalg.norm(embedding)
+            
+            # Normalize the embedding if needed
+            if self.mcp_config["embeddings_config"]["normalize"]:
+                norm = np.linalg.norm(embedding)
+                if norm > 0:
                     embedding = [x / norm for x in embedding]
-                return embedding
-            else:
-                self.logger.log_error(f"Embedding API error: {response.status_code} - {response.text}")
-                # Return zeros as fallback
-                return [0.0] * self.mcp_config["embeddings_config"]["dimensions"]
+            return embedding
         except Exception as e:
             self.logger.log_error(f"Embedding generation error: {str(e)}")
             return [0.0] * self.mcp_config["embeddings_config"]["dimensions"]
