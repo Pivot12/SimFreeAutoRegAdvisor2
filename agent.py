@@ -31,8 +31,8 @@ class AutoRegulationsAgent:
     
     def __init__(self):
         # Initialize API client
-        self.groq_api_key = os.getenv("GROQ_API_KEY")
-        self.model = os.getenv("LLAMA_MODEL", "llama3-70b-8192")
+        self.cerebras_api_key = os.getenv("CEREBRAS_API_KEY")
+        self.model = os.getenv("LLAMA_MODEL", "llama-4-scout-17b-16e-instruct")
         
         # We'll implement direct API calls instead of using the Groq client
         # to avoid compatibility issues
@@ -50,8 +50,8 @@ class AutoRegulationsAgent:
             interregs_password = st.secrets["interregs"]["password"]
             
             # Also try to get Groq API key from secrets if not in env
-            if not self.groq_api_key and "groq" in st.secrets and "api_key" in st.secrets["groq"]:
-                self.groq_api_key = st.secrets["groq"]["api_key"]
+            if not self.cerebras_api_key and "cerebras" in st.secrets and "api_key" in st.secrets["cerebras"]:
+                self.cerebras_api_key = st.secrets["cerebras"]["api_key"]
                 
             self.logger.log_event("using_streamlit_secrets", {"success": True})
         except Exception as e:
@@ -264,17 +264,18 @@ ANSWER:""",
                 embedding = response.data[0].embedding
             except (AttributeError, TypeError):
                 # Fallback to direct API call if client method not available
-                endpoint = "https://api.groq.com/openai/v1/embeddings"
+                endpoint = "https://api.cerebras.io/v1/embeddings"
                 headers = {
-                    "Authorization": f"Bearer {self.groq_api_key}",
+                    "Authorization": f"Bearer {self.cerebras_api_key}",
                     "Content-Type": "application/json"
                 }
                 
+                # Update model name:
                 response = requests.post(
                     endpoint,
                     headers=headers,
                     json={
-                        "model": "llama3-embedding-v1",
+                        "model": "llama-4-scout-32b-embeddings",
                         "input": text
                     }
                 )
@@ -704,21 +705,21 @@ ANSWER:""",
         )
         
         try:
-            if not self.groq_api_key:
-                raise Exception("GROQ_API_KEY is not set. Please set it in your environment variables or Streamlit secrets.")
-                
+            if not self.cerebras_api_key:
+                raise Exception("CEREBRAS_API_KEY is not set...")
+            
             headers = {
-                "Authorization": f"Bearer {self.groq_api_key}",
+                "Authorization": f"Bearer {self.cerebras_api_key}",
                 "Content-Type": "application/json"
             }
             
             response = requests.post(
-                "https://api.groq.com/openai/v1/chat/completions",
+                "https://api.cerebras.io/v1/chat/completions",
                 headers=headers,
                 json={
-                    "model": self.model,
+                    "model": "llama-4-scout-32b",
                     "messages": [
-                        {"role": "system", "content": "You are an automotive regulations expert with 30 years of experience. Provide accurate, detailed answers about automotive regulations based ONLY on the sources provided."},
+                        {"role": "system", "content": "You are an automotive regulations expert with 30 years of experience..."},
                         {"role": "user", "content": prompt}
                     ],
                     "temperature": 0.2,
