@@ -105,10 +105,14 @@ class AutoRegulationCrawler:
         
         return True
     
-    def fetch_url(self, url: str) -> Optional[str]:
+    def fetch_url(self, url: str, verify_ssl: bool = True) -> Optional[str]:
         """
         Fetch the content of a URL with proper headers and rate limiting.
         Returns the HTML content or None if unsuccessful.
+        
+        Args:
+            url: The URL to fetch
+            verify_ssl: Whether to verify SSL certificates
         """
         # Ensure URL has scheme
         if not url.startswith(('http://', 'https://')):
@@ -116,6 +120,12 @@ class AutoRegulationCrawler:
             
         parsed_url = urlparse(url)
         domain = parsed_url.netloc
+        
+        # Skip certain domains that consistently block access
+        blocked_domains = ['iec.ch']
+        if any(blocked in domain for blocked in blocked_domains):
+            self.logger.log_event("skipping_blocked_domain", {"domain": domain})
+            return None
         
         # Check robots.txt
         if not self._check_robots_txt(url):
@@ -141,7 +151,7 @@ class AutoRegulationCrawler:
         }
         
         try:
-            response = requests.get(url, headers=headers, timeout=15)
+            response = requests.get(url, headers=headers, timeout=15, verify=verify_ssl)
             
             if response.status_code == 200:
                 # Detect encoding if not specified
@@ -158,11 +168,21 @@ class AutoRegulationCrawler:
                     if not redirect_url.startswith(('http://', 'https://')):
                         redirect_url = urljoin(url, redirect_url)
                     self.logger.log_event("redirect", {"from": url, "to": redirect_url})
-                    return self.fetch_url(redirect_url)
+                    return self.fetch_url(redirect_url, verify_ssl)
+            elif response.status_code == 403:
+                # Specific handling for blocked access
+                self.logger.log_error(f"Access forbidden to URL: {url}. Site is likely blocking crawler access.")
+                return None
             else:
                 self.logger.log_error(f"HTTP error {response.status_code} for URL: {url}")
                 return None
                 
+        except requests.exceptions.SSLError as e:
+            self.logger.log_error(f"SSL Error for URL {url}: {str(e)}")
+            # Try again without SSL verification if this is a certificate issue
+            if verify_ssl:
+                return self.fetch_url(url, verify_ssl=False)
+            return None
         except Exception as e:
             self.logger.log_error(f"Error fetching URL {url}: {str(e)}")
             return None
