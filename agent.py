@@ -2,15 +2,20 @@ import os
 import time
 import json
 import hashlib
-import re
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 import requests
 from dotenv import load_dotenv
 import numpy as np
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin
 from crawler import AutoRegulationCrawler
 from vector_store import VectorStore
 from logger import Logger
+
+# Import the InterregsClient and RegulatoryKnowledge
+from interregs_client import InterregsClient
+from regulatory_knowledge import RegulatoryKnowledge
 
 # Load environment variables
 load_dotenv()
@@ -23,7 +28,23 @@ class AutoRegulationsAgent:
     AI agent for answering automotive regulation queries using RAG with direct access
     to regulatory websites and documents.
     """
+    try:
+    import streamlit as st
+    interregs_email = st.secrets["interregs"]["email"]
+    interregs_password = st.secrets["interregs"]["password"]
     
+    # Also try to get Groq API key from secrets if not in env
+    if not self.groq_api_key and "groq" in st.secrets and "api_key" in st.secrets["groq"]:
+        self.groq_api_key = st.secrets["groq"]["api_key"]
+        
+    self.logger.log_event("using_streamlit_secrets", {"success": True})
+except Exception as e:
+    # Fallback to environment variables
+    self.logger.log_error(f"Could not load secrets: {str(e)}")
+    interregs_email = os.getenv("INTERREGS_EMAIL", "")
+    interregs_password = os.getenv("INTERREGS_PASSWORD", "")
+    self.logger.log_event("using_env_variables", {"success": True})
+
     def __init__(self):
         # Initialize API client
         self.groq_api_key = os.getenv("GROQ_API_KEY")
@@ -38,12 +59,14 @@ class AutoRegulationsAgent:
         self.vector_store = VectorStore()
         self.logger = Logger()
         
-        # Initialize Interregs client with credentials
-        self.interregs_client = InterregsClient(
-            email="neelshah@lucidmotors.com",
-            password="eyzzp3iw",
-            logger=self.logger.logger
-        )
+        # Initialize Interregs client
+self.interregs_client = None
+if interregs_email and interregs_password:
+    self.interregs_client = InterregsClient(
+        email=interregs_email,
+        password=interregs_password,
+        logger=self.logger.logger
+    )
         
         # Initialize regulatory knowledge base
         self.reg_knowledge = RegulatoryKnowledge()
