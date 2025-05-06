@@ -111,26 +111,57 @@ class InterregsClient:
             
             if response.status_code != 200:
                 self.logger.error(f"Search failed: {response.status_code}")
-                return []
+                # Try alternative search path
+                alt_search_url = f"{self.base_url}/en/search"
+                response = self.session.get(alt_search_url, params=search_params)
+                
+                if response.status_code != 200:
+                    self.logger.error(f"Alternative search failed: {response.status_code}")
+                    return []
             
             # Parse results
             soup = BeautifulSoup(response.text, 'html.parser')
             results = []
             
-            # Find search result elements - this needs to be adjusted based on actual HTML structure
+            # Find search result elements - attempt multiple patterns
             result_elements = soup.find_all('div', class_='search-result-item')
             
             if not result_elements:
-                # Try alternative selectors if the expected class isn't found
                 result_elements = soup.find_all('div', class_='result-item')
             
             if not result_elements:
-                # Try a more generic approach if specific classes not found
-                # Look for links within the main content area
+                result_elements = soup.find_all('article')
+            
+            if not result_elements:
+                # Try a more generic approach - look for links with headings
+                for heading in soup.find_all(['h2', 'h3', 'h4']):
+                    link = heading.find('a', href=True)
+                    if link:
+                        results.append({
+                            'title': heading.get_text().strip(),
+                            'url': urljoin(self.base_url, link['href']),
+                            'description': ""
+                        })
+            
+            if not results and not result_elements:
+                # If still no results, look for any links in the main content
                 main_content = soup.find('main') or soup.find('div', id='content') or soup.find('div', class_='container')
                 if main_content:
-                    result_elements = main_content.find_all('a', href=True)
+                    links = main_content.find_all('a', href=True)
+                    for link in links:
+                        link_text = link.get_text().strip()
+                        if link_text and len(link_text) > 10:  # Avoid menu/navigation links
+                            url = link['href']
+                            if not url.startswith(('http://', 'https://')):
+                                url = urljoin(self.base_url, url)
+                            
+                            results.append({
+                                'title': link_text,
+                                'url': url,
+                                'description': ""
+                            })
             
+            # Process structured result elements if found
             for result in result_elements:
                 try:
                     # Extract title and URL
@@ -163,8 +194,16 @@ class InterregsClient:
                     self.logger.error(f"Error parsing result: {str(e)}")
                     continue
             
-            self.logger.info(f"Found {len(results)} search results for query: {query}")
-            return results
+            # Remove duplicates
+            unique_results = []
+            seen_urls = set()
+            for result in results:
+                if result['url'] not in seen_urls:
+                    unique_results.append(result)
+                    seen_urls.add(result['url'])
+            
+            self.logger.info(f"Found {len(unique_results)} search results for query: {query}")
+            return unique_results
             
         except Exception as e:
             self.logger.error(f"Error during search: {str(e)}")
