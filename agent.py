@@ -28,69 +28,71 @@ class AutoRegulationsAgent:
     AI agent for answering automotive regulation queries using RAG with direct access
     to regulatory websites and documents.
     """
-    try:
-    import streamlit as st
-    interregs_email = st.secrets["interregs"]["email"]
-    interregs_password = st.secrets["interregs"]["password"]
     
-    # Also try to get Groq API key from secrets if not in env
-    if not self.groq_api_key and "groq" in st.secrets and "api_key" in st.secrets["groq"]:
-        self.groq_api_key = st.secrets["groq"]["api_key"]
-        
-    self.logger.log_event("using_streamlit_secrets", {"success": True})
-except Exception as e:
-    # Fallback to environment variables
-    self.logger.log_error(f"Could not load secrets: {str(e)}")
-    interregs_email = os.getenv("INTERREGS_EMAIL", "")
-    interregs_password = os.getenv("INTERREGS_PASSWORD", "")
-    self.logger.log_event("using_env_variables", {"success": True})
-
     def __init__(self):
-        # Initialize API client
-        self.groq_api_key = os.getenv("GROQ_API_KEY")
-        self.model = os.getenv("LLAMA_MODEL", "llama3-70b-8192")
+    # Initialize API client
+    self.groq_api_key = os.getenv("GROQ_API_KEY")
+    self.model = os.getenv("LLAMA_MODEL", "llama3-70b-8192")
+    
+    # We'll implement direct API calls instead of using the Groq client
+    # to avoid compatibility issues
+    self.groq_client = None
+    
+    # Initialize components
+    self.crawler = AutoRegulationCrawler()
+    self.vector_store = VectorStore()
+    self.logger = Logger()
+    
+    # Get credentials from Streamlit secrets if available
+    try:
+        import streamlit as st
+        interregs_email = st.secrets["interregs"]["email"]
+        interregs_password = st.secrets["interregs"]["password"]
         
-        # We'll implement direct API calls instead of using the Groq client
-        # to avoid compatibility issues
-        self.groq_client = None
-        
-        # Initialize components
-        self.crawler = AutoRegulationCrawler()
-        self.vector_store = VectorStore()
-        self.logger = Logger()
-        
-        # Initialize Interregs client
-self.interregs_client = None
-if interregs_email and interregs_password:
-    self.interregs_client = InterregsClient(
-        email=interregs_email,
-        password=interregs_password,
-        logger=self.logger.logger
-    )
-        
-        # Initialize regulatory knowledge base
-        self.reg_knowledge = RegulatoryKnowledge()
-        
-        # Learning database
-        self.feedback_threshold = 0.7  # Threshold for positive feedback to learn
-        self.query_cache = {}  # Cache for frequently asked queries
-        
-        # Load regulatory sources
-        self.reg_sources = self._load_regulatory_sources()
-        
-        # Track agent performance
-        self.query_count = 0
-        self.successful_queries = 0
-        
-        # Set up Model Context Protocol
-        self.mcp_config = {
-            "version": MCP_VERSION,
-            "prompt_templates": self._load_prompt_templates(),
-            "embeddings_config": {
-                "dimensions": 1536,
-                "normalize": True
-            }
+        # Also try to get Groq API key from secrets if not in env
+        if not self.groq_api_key and "groq" in st.secrets and "api_key" in st.secrets["groq"]:
+            self.groq_api_key = st.secrets["groq"]["api_key"]
+            
+        self.logger.log_event("using_streamlit_secrets", {"success": True})
+    except Exception as e:
+        # Fallback to environment variables
+        self.logger.log_error(f"Could not load secrets: {str(e)}")
+        interregs_email = os.getenv("INTERREGS_EMAIL", "")
+        interregs_password = os.getenv("INTERREGS_PASSWORD", "")
+        self.logger.log_event("using_env_variables", {"success": True})
+    
+    # Initialize Interregs client
+    self.interregs_client = None
+    if interregs_email and interregs_password:
+        self.interregs_client = InterregsClient(
+            email=interregs_email,
+            password=interregs_password,
+            logger=self.logger.logger
+        )
+    
+    # Initialize regulatory knowledge base
+    self.reg_knowledge = RegulatoryKnowledge()
+    
+    # Learning database
+    self.feedback_threshold = 0.7  # Threshold for positive feedback to learn
+    self.query_cache = {}  # Cache for frequently asked queries
+    
+    # Load regulatory sources
+    self.reg_sources = self._load_regulatory_sources()
+    
+    # Track agent performance
+    self.query_count = 0
+    self.successful_queries = 0
+    
+    # Set up Model Context Protocol
+    self.mcp_config = {
+        "version": MCP_VERSION,
+        "prompt_templates": self._load_prompt_templates(),
+        "embeddings_config": {
+            "dimensions": 1536,
+            "normalize": True
         }
+    }
     
     def _load_regulatory_sources(self) -> Dict:
         """Load the list of regulatory sources and their access patterns."""
@@ -468,7 +470,6 @@ ANSWER:""",
             terms = [word for word in words if word not in stop_words and len(word) > 2]
         
         return terms
-    
     def process_query(self, query: str) -> Tuple[str, List[Dict]]:
         """
         Process a user query and return a response based on regulatory documents.
@@ -513,66 +514,69 @@ ANSWER:""",
         interregs_terms = self.reg_knowledge.get_interregs_search_terms(query_terms)
         self.logger.log_event("interregs_search_terms", {"terms": interregs_terms})
         
-        # Step 5: Try to get information from interregs.net first
+        # Step 5: Try to get information from interregs.net if client is available
         interregs_content = ""
         interregs_sources = []
         
-        try:
-            # Map regions to interregs.net format
-            region = None
-            if regions:
-                region_map = {
-                    "usa": "US", "us": "US", "united states": "US",
-                    "europe": "EU", "eu": "EU", "european union": "EU",
-                    "uk": "UK", "united kingdom": "UK", 
-                    "china": "CN", "japan": "JP", "india": "IN",
-                    "canada": "CA", "australia": "AU", "brazil": "BR", 
-                    "korea": "KR", "south korea": "KR",
-                    "russia": "RU", "mexico": "MX",
-                    "south africa": "ZA", "argentina": "AR"
-                }
+        if self.interregs_client:
+            try:
+                # Map regions to interregs.net format
+                region = None
+                if regions:
+                    region_map = {
+                        "usa": "US", "us": "US", "united states": "US",
+                        "europe": "EU", "eu": "EU", "european union": "EU",
+                        "uk": "UK", "united kingdom": "UK", 
+                        "china": "CN", "japan": "JP", "india": "IN",
+                        "canada": "CA", "australia": "AU", "brazil": "BR", 
+                        "korea": "KR", "south korea": "KR",
+                        "russia": "RU", "mexico": "MX",
+                        "south africa": "ZA", "argentina": "AR"
+                    }
+                    
+                    for r in regions:
+                        r_lower = r.lower()
+                        if r_lower in region_map:
+                            region = region_map[r_lower]
+                            break
                 
-                for r in regions:
-                    r_lower = r.lower()
-                    if r_lower in region_map:
-                        region = region_map[r_lower]
+                # Try each search term in sequence
+                interregs_results = []
+                for search_term in interregs_terms[:3]:  # Limit to top 3 terms
+                    if time.time() > end_time - 30:  # Leave at least 30 seconds for the rest of processing
+                        self.logger.log_event("timeout", {"phase": "interregs_search"})
                         break
-            
-            # Try each search term in sequence
-            interregs_results = []
-            for search_term in interregs_terms[:3]:  # Limit to top 3 terms
-                if time.time() > end_time - 30:  # Leave at least 30 seconds for the rest of processing
-                    self.logger.log_event("timeout", {"phase": "interregs_search"})
-                    break
+                        
+                    # Search interregs
+                    self.logger.log_event("searching_interregs", {"query": search_term, "region": region})
+                    results = self.interregs_client.search_regulations(search_term, region)
+                    interregs_results.extend(results)
                     
-                # Search interregs
-                self.logger.log_event("searching_interregs", {"query": search_term, "region": region})
-                results = self.interregs_client.search_regulations(search_term, region)
-                interregs_results.extend(results)
+                    # If we found at least 2 relevant results, stop searching
+                    if len(results) >= 2:
+                        break
                 
-                # If we found at least 2 relevant results, stop searching
-                if len(results) >= 2:
-                    break
-            
-            # Get content from top 3 most relevant results
-            for result in interregs_results[:3]:
-                if time.time() > end_time - 20:  # Leave 20 seconds for response generation
-                    self.logger.log_event("timeout", {"phase": "interregs_content_fetch"})
-                    break
-                    
-                content = self.interregs_client.get_regulation_content(result["url"])
-                if content:
-                    interregs_content += f"\n\n--- {result['title']} ---\n{content}"
-                    interregs_sources.append({
-                        "title": result["title"],
-                        "url": result["url"],
-                        "source": "Interregs.net"
-                    })
-            
-            if interregs_content:
-                self.logger.log_event("interregs_content_found", {"num_sources": len(interregs_sources)})
-        except Exception as e:
-            self.logger.log_error(f"Error accessing Interregs: {str(e)}")
+                # Get content from top 3 most relevant results
+                for result in interregs_results[:3]:
+                    if time.time() > end_time - 20:  # Leave 20 seconds for response generation
+                        self.logger.log_event("timeout", {"phase": "interregs_content_fetch"})
+                        break
+                        
+                    content = self.interregs_client.get_regulation_content(result["url"])
+                    if content:
+                        interregs_content += f"\n\n--- {result['title']} ---\n{content}"
+                        interregs_sources.append({
+                            "title": result["title"],
+                            "url": result["url"],
+                            "source": "Interregs.net"
+                        })
+                
+                if interregs_content:
+                    self.logger.log_event("interregs_content_found", {"num_sources": len(interregs_sources)})
+            except Exception as e:
+                self.logger.log_error(f"Error accessing Interregs: {str(e)}")
+        else:
+            self.logger.log_event("interregs_client_unavailable", {})
         
         # Step 6: Get direct URLs for specific regulations from our knowledge base
         regulation_urls = self.reg_knowledge.get_regulation_urls(relevant_regulations)
@@ -624,7 +628,7 @@ ANSWER:""",
                         relevant_sections = []
                         for term in query_terms:
                             # Find elements containing the term
-                            for element in soup.find_all(string=lambda text: term.lower() in text.lower()):
+                            for element in soup.find_all(string=lambda text: text and term.lower() in text.lower()):
                                 # Get the parent element to capture context
                                 parent = element.parent
                                 if parent:
@@ -645,7 +649,41 @@ ANSWER:""",
                 except Exception as e:
                     self.logger.log_error(f"Error fetching regulatory body URL {url}: {str(e)}")
         
-        # Step 9: Combine all sources and generate response
+        # Step 9: If we still don't have enough information, try the traditional crawler approach
+        if len(interregs_sources) + len(web_sources) < 1 and time.time() <= end_time - 15:
+            # Select relevant sources
+            relevant_source_ids = self._select_sources(query_analysis)
+            self.logger.log_event("selected_sources", {"sources": relevant_source_ids})
+            
+            # Only process top 2 sources to speed things up
+            for source_id in relevant_source_ids[:2]:
+                # Check timeout
+                if time.time() > end_time - 10:
+                    self.logger.log_event("timeout", {"phase": "document_retrieval"})
+                    break
+                    
+                source_info = self.reg_sources[source_id]
+                # Set a timeout for each source retrieval (10 seconds)
+                try:
+                    documents = self.crawler.retrieve_documents_with_timeout(
+                        source_info["base_url"],
+                        source_info["doc_patterns"],
+                        query_analysis,
+                        timeout=5  # Shorter timeout since this is a fallback
+                    )
+                
+                    # Process and collect documents
+                    for doc in documents:
+                        web_sources.append({
+                            "title": doc["title"],
+                            "url": doc["url"],
+                            "source": source_info["name"],
+                            "content": doc["content"]
+                        })
+                except Exception as e:
+                    self.logger.log_error(f"Error retrieving documents from {source_id}: {str(e)}")
+        
+        # Step 10: Combine all sources and generate response
         all_sources = interregs_sources + [{"title": s["title"], "url": s["url"], "source": s["source"]} for s in web_sources]
         
         # Create context from all sources
@@ -659,13 +697,16 @@ ANSWER:""",
             self.logger.log_performance(query, time.time() - start_time, False)
             return response, []
         
-        # Step 10: Generate response using Groq API directly
+        # Step 11: Generate response using Groq API directly
         prompt = self.mcp_config["prompt_templates"]["response_generation"].format(
             query=query,
             context=context
         )
         
         try:
+            if not self.groq_api_key:
+                raise Exception("GROQ_API_KEY is not set. Please set it in your environment variables or Streamlit secrets.")
+                
             headers = {
                 "Authorization": f"Bearer {self.groq_api_key}",
                 "Content-Type": "application/json"
@@ -708,6 +749,7 @@ ANSWER:""",
             self.logger.log_error(f"Response generation error: {str(e)}")
             self.logger.log_performance(query, time.time() - start_time, False)
             return error_message, []
+
             
     def _check_static_knowledge(self, query: str, lenient: bool = False) -> Optional[str]:
         """Check if the query can be answered from static knowledge about common regulations."""
