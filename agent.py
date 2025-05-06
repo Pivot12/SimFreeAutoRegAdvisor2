@@ -38,6 +38,13 @@ class AutoRegulationsAgent:
         self.vector_store = VectorStore()
         self.logger = Logger()
         
+        # Initialize Interregs client with credentials
+        self.interregs_client = InterregsClient(
+            email="neelshah@lucidmotors.com",
+            password="eyzzp3iw",
+            logger=self.logger.logger
+        )
+        
         # Learning database
         self.feedback_threshold = 0.7  # Threshold for positive feedback to learn
         self.query_cache = {}  # Cache for frequently asked queries
@@ -429,14 +436,6 @@ ANSWER:""",
             self.logger.log_performance(query, processing_time, True)
             return cached_response, []  # No sources needed for cached response
         
-        # Check for static knowledge about common automotive regulations
-        static_response = self._check_static_knowledge(query)
-        if static_response:
-            processing_time = time.time() - start_time
-            self.logger.log_performance(query, processing_time, True)
-            source_info = [{"title": "Pre-loaded Regulatory Database", "url": "#", "source": "Static Knowledge Base"}]
-            return static_response, source_info
-        
         # Set a timeout for the entire query processing
         timeout = 60  # 60 seconds max processing time
         end_time = start_time + timeout
@@ -445,63 +444,129 @@ ANSWER:""",
         query_analysis = self._analyze_query(query)
         self.logger.log_event("query_analysis", query_analysis)
         
-        # Step 2: Select relevant sources
-        relevant_source_ids = self._select_sources(query_analysis)
-        self.logger.log_event("selected_sources", {"sources": relevant_source_ids})
+        # Step 2: Try to get information from interregs.net first
+        interregs_results = []
+        interregs_content = ""
+        interregs_sources = []
         
-        # Step 3: Retrieve documents from sources
-        all_chunks = []
-        source_documents = []
-        
-        # Only process top 3 sources to speed things up
-        for source_id in relevant_source_ids[:3]:
-            # Check timeout
-            if time.time() > end_time:
-                self.logger.log_event("timeout", {"phase": "document_retrieval"})
-                break
+        try:
+            # Make search query based on terms from the analysis
+            search_terms = []
+            if "regulation_types" in query_analysis:
+                search_terms.extend(query_analysis["regulation_types"])
+            if "vehicle_categories" in query_analysis:
+                search_terms.extend(query_analysis["vehicle_categories"])
+            if "technical_parameters" in query_analysis:
+                search_terms.extend(query_analysis["technical_parameters"])
                 
-            source_info = self.reg_sources[source_id]
-            # Set a timeout for each source retrieval (10 seconds)
-            try:
-                documents = self.crawler.retrieve_documents_with_timeout(
-                    source_info["base_url"],
-                    source_info["doc_patterns"],
-                    query_analysis,
-                    timeout=10
-                )
+            # Add the original query terms
+            search_terms.append(query)
             
-                # Process and chunk documents
-                for doc in documents:
-                    chunks = self.crawler.chunk_document(doc["content"])
-                    all_chunks.extend(chunks)
-                    source_documents.append({
-                        "title": doc["title"],
-                        "url": doc["url"],
-                        "source": source_info["name"]
-                    })
-            except Exception as e:
-                self.logger.log_error(f"Error retrieving documents from {source_id}: {str(e)}")
-        
-        # Step 4: If no documents found, return a helpful message
-        if not all_chunks:
-            # Try with static knowledge again with a more lenient match
-            static_response = self._check_static_knowledge(query, lenient=True)
-            if static_response:
-                processing_time = time.time() - start_time
-                self.logger.log_performance(query, processing_time, True)
-                source_info = [{"title": "Pre-loaded Regulatory Database", "url": "#", "source": "Static Knowledge Base"}]
-                return static_response, source_info
+            # Create a search string
+            search_query = " ".join(search_terms)
+            
+            # Determine region if possible
+            region = None
+            if "regions" in query_analysis and query_analysis["regions"]:
+                region_map = {
+                    "usa": "US", 
+                    "us": "US",
+                    "europe": "EU", 
+                    "eu": "EU",
+                    "uk": "UK", 
+                    "china": "CN",
+                    "japan": "JP", 
+                    "india": "IN",
+                    "canada": "CA", 
+                    "australia": "AU",
+                    "brazil": "BR", 
+                    "korea": "KR",
+                    "russia": "RU", 
+                    "mexico": "MX",
+                    "south africa": "ZA", 
+                    "argentina": "AR"
+                }
                 
+                for r in query_analysis["regions"]:
+                    if r.lower() in region_map:
+                        region = region_map[r.lower()]
+                        break
+            
+            # Search interregs
+            self.logger.log_event("searching_interregs", {"query": search_query, "region": region})
+            interregs_results = self.interregs_client.search_regulations(search_query, region)
+            
+            # Get content from top 3 most relevant results
+            for result in interregs_results[:3]:
+                if time.time() > end_time:
+                    self.logger.log_event("timeout", {"phase": "interregs_content_fetch"})
+                    break
+                    
+                content = self.interregs_client.get_regulation_content(result["url"])
+                if content:
+                    interregs_content += f"\n\n--- {result['title']} ---\n{content}"
+                    interregs_sources.append({
+                        "title": result["title"],
+                        "url": result["url"],
+                        "source": "Interregs.net"
+                    })
+            
+            if interregs_content:
+                self.logger.log_event("interregs_content_found", {"num_sources": len(interregs_sources)})
+        except Exception as e:
+            self.logger.log_error(f"Error accessing Interregs: {str(e)}")
+        
+        # Step 3: Get content from other regulatory sources if needed
+        web_sources = []
+        
+        if len(interregs_sources) < 2 and time.time() <= end_time:
+            # Select relevant sources
+            relevant_source_ids = self._select_sources(query_analysis)
+            self.logger.log_event("selected_sources", {"sources": relevant_source_ids})
+            
+            # Only process top 3 sources to speed things up
+            for source_id in relevant_source_ids[:3]:
+                # Check timeout
+                if time.time() > end_time:
+                    self.logger.log_event("timeout", {"phase": "document_retrieval"})
+                    break
+                    
+                source_info = self.reg_sources[source_id]
+                # Set a timeout for each source retrieval (10 seconds)
+                try:
+                    documents = self.crawler.retrieve_documents_with_timeout(
+                        source_info["base_url"],
+                        source_info["doc_patterns"],
+                        query_analysis,
+                        timeout=10
+                    )
+                
+                    # Process and collect documents
+                    for doc in documents:
+                        web_sources.append({
+                            "title": doc["title"],
+                            "url": doc["url"],
+                            "source": source_info["name"],
+                            "content": doc["content"]
+                        })
+                except Exception as e:
+                    self.logger.log_error(f"Error retrieving documents from {source_id}: {str(e)}")
+        
+        # Step 4: Combine all sources and generate response
+        all_sources = interregs_sources + [{"title": s["title"], "url": s["url"], "source": s["source"]} for s in web_sources]
+        
+        # Create context from all sources
+        context = interregs_content
+        for source in web_sources:
+            context += f"\n\n--- {source['title']} ---\n{source['content']}"
+        
+        # Check if we have enough content
+        if not context.strip():
             response = "I couldn't find specific regulatory information to answer your query accurately. Please try rephrasing your question or specifying particular regulations you're interested in."
             self.logger.log_performance(query, time.time() - start_time, False)
             return response, []
         
-        # Step 5: Generate embeddings and find relevant chunks
-        query_embedding = self._get_embeddings(query)
-        relevant_chunks = self.vector_store.find_relevant_chunks(query_embedding, all_chunks)
-        
-        # Step 6: Generate response using Groq API directly
-        context = "\n\n".join([f"Document: {chunk['text']}\nSource: {chunk['source']}" for chunk in relevant_chunks])
+        # Generate response using Groq API directly
         prompt = self.mcp_config["prompt_templates"]["response_generation"].format(
             query=query,
             context=context
@@ -533,17 +598,17 @@ ANSWER:""",
             generated_response = response.json()["choices"][0]["message"]["content"]
             
             # Add citation references
-            formatted_response = self._add_citations(generated_response, source_documents)
+            formatted_response = self._add_citations(generated_response, all_sources)
             
             # Update cache
-            self._update_cache(query, formatted_response, source_documents)
+            self._update_cache(query, formatted_response, all_sources)
             
             # Log performance
             processing_time = time.time() - start_time
             self.logger.log_performance(query, processing_time, True)
             
             self.successful_queries += 1
-            return formatted_response, source_documents
+            return formatted_response, all_sources
             
         except Exception as e:
             error_message = f"I encountered an error while processing your query: {str(e)}"
@@ -704,3 +769,4 @@ These requirements balance visibility needs with preventing glare to oncoming dr
             "high_rated_queries": len(high_rated_queries),
             "source_success_rates": source_success_rates
         })
+    
