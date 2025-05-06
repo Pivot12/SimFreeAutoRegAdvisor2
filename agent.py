@@ -30,69 +30,69 @@ class AutoRegulationsAgent:
     """
     
     def __init__(self):
-    # Initialize API client
-    self.groq_api_key = os.getenv("GROQ_API_KEY")
-    self.model = os.getenv("LLAMA_MODEL", "llama3-70b-8192")
-    
-    # We'll implement direct API calls instead of using the Groq client
-    # to avoid compatibility issues
-    self.groq_client = None
-    
-    # Initialize components
-    self.crawler = AutoRegulationCrawler()
-    self.vector_store = VectorStore()
-    self.logger = Logger()
-    
-    # Get credentials from Streamlit secrets if available
-    try:
-        import streamlit as st
-        interregs_email = st.secrets["interregs"]["email"]
-        interregs_password = st.secrets["interregs"]["password"]
+        # Initialize API client
+        self.groq_api_key = os.getenv("GROQ_API_KEY")
+        self.model = os.getenv("LLAMA_MODEL", "llama3-70b-8192")
         
-        # Also try to get Groq API key from secrets if not in env
-        if not self.groq_api_key and "groq" in st.secrets and "api_key" in st.secrets["groq"]:
-            self.groq_api_key = st.secrets["groq"]["api_key"]
+        # We'll implement direct API calls instead of using the Groq client
+        # to avoid compatibility issues
+        self.groq_client = None
+        
+        # Initialize components
+        self.crawler = AutoRegulationCrawler()
+        self.vector_store = VectorStore()
+        self.logger = Logger()
+        
+        # Get credentials from Streamlit secrets if available
+        try:
+            import streamlit as st
+            interregs_email = st.secrets["interregs"]["email"]
+            interregs_password = st.secrets["interregs"]["password"]
             
-        self.logger.log_event("using_streamlit_secrets", {"success": True})
-    except Exception as e:
-        # Fallback to environment variables
-        self.logger.log_error(f"Could not load secrets: {str(e)}")
-        interregs_email = os.getenv("INTERREGS_EMAIL", "")
-        interregs_password = os.getenv("INTERREGS_PASSWORD", "")
-        self.logger.log_event("using_env_variables", {"success": True})
-    
-    # Initialize Interregs client
-    self.interregs_client = None
-    if interregs_email and interregs_password:
-        self.interregs_client = InterregsClient(
-            email=interregs_email,
-            password=interregs_password,
-            logger=self.logger.logger
-        )
-    
-    # Initialize regulatory knowledge base
-    self.reg_knowledge = RegulatoryKnowledge()
-    
-    # Learning database
-    self.feedback_threshold = 0.7  # Threshold for positive feedback to learn
-    self.query_cache = {}  # Cache for frequently asked queries
-    
-    # Load regulatory sources
-    self.reg_sources = self._load_regulatory_sources()
-    
-    # Track agent performance
-    self.query_count = 0
-    self.successful_queries = 0
-    
-    # Set up Model Context Protocol
-    self.mcp_config = {
-        "version": MCP_VERSION,
-        "prompt_templates": self._load_prompt_templates(),
-        "embeddings_config": {
-            "dimensions": 1536,
-            "normalize": True
+            # Also try to get Groq API key from secrets if not in env
+            if not self.groq_api_key and "groq" in st.secrets and "api_key" in st.secrets["groq"]:
+                self.groq_api_key = st.secrets["groq"]["api_key"]
+                
+            self.logger.log_event("using_streamlit_secrets", {"success": True})
+        except Exception as e:
+            # Fallback to environment variables
+            self.logger.log_error(f"Could not load secrets: {str(e)}")
+            interregs_email = os.getenv("INTERREGS_EMAIL", "")
+            interregs_password = os.getenv("INTERREGS_PASSWORD", "")
+            self.logger.log_event("using_env_variables", {"success": True})
+        
+        # Initialize Interregs client
+        self.interregs_client = None
+        if interregs_email and interregs_password:
+            self.interregs_client = InterregsClient(
+                email=interregs_email,
+                password=interregs_password,
+                logger=self.logger.logger
+            )
+        
+        # Initialize regulatory knowledge base
+        self.reg_knowledge = RegulatoryKnowledge()
+        
+        # Learning database
+        self.feedback_threshold = 0.7  # Threshold for positive feedback to learn
+        self.query_cache = {}  # Cache for frequently asked queries
+        
+        # Load regulatory sources
+        self.reg_sources = self._load_regulatory_sources()
+        
+        # Track agent performance
+        self.query_count = 0
+        self.successful_queries = 0
+        
+        # Set up Model Context Protocol
+        self.mcp_config = {
+            "version": MCP_VERSION,
+            "prompt_templates": self._load_prompt_templates(),
+            "embeddings_config": {
+                "dimensions": 1536,
+                "normalize": True
+            }
         }
-    }
     
     def _load_regulatory_sources(self) -> Dict:
         """Load the list of regulatory sources and their access patterns."""
