@@ -45,6 +45,9 @@ class AutoRegulationsAgent:
             logger=self.logger.logger
         )
         
+        # Initialize regulatory knowledge base
+        self.reg_knowledge = RegulatoryKnowledge()
+        
         # Learning database
         self.feedback_threshold = 0.7  # Threshold for positive feedback to learn
         self.query_cache = {}  # Cache for frequently asked queries
@@ -413,6 +416,36 @@ ANSWER:""",
         except Exception as e:
             self.logger.log_error(f"Cache load error: {str(e)}")
     
+    def extract_query_terms(self, query: str) -> List[str]:
+        """Extract key terms from a query for regulation searching."""
+        # Basic extraction of important terms using a list of automotive regulatory components
+        important_components = [
+            "lighting", "brake", "stop lamp", "centre high mounted stop lamp", "chmsl",
+            "headlamp", "headlight", "turn signal", "indicator", "safety belt", "seat belt",
+            "tire", "tyre", "wheel", "brake system", "emissions", "exhaust", "fuel economy",
+            "electric", "battery", "pedestrian", "crash", "impact", "airbag", "height", 
+            "width", "length", "installation", "position", "color", "colour", "intensity",
+            "requirements", "specifications", "dimensions"
+        ]
+        
+        query_lower = query.lower()
+        terms = []
+        
+        # Check for each component in the query
+        for component in important_components:
+            if component in query_lower:
+                terms.append(component)
+        
+        # If no specific terms found, use general words
+        if not terms:
+            # Simple tokenization
+            words = query_lower.split()
+            # Remove common stop words
+            stop_words = ["what", "is", "are", "the", "for", "a", "an", "of", "in", "to", "and", "or"]
+            terms = [word for word in words if word not in stop_words and len(word) > 2]
+        
+        return terms
+    
     def process_query(self, query: str) -> Tuple[str, List[Dict]]:
         """
         Process a user query and return a response based on regulatory documents.
@@ -444,61 +477,63 @@ ANSWER:""",
         query_analysis = self._analyze_query(query)
         self.logger.log_event("query_analysis", query_analysis)
         
-        # Step 2: Try to get information from interregs.net first
-        interregs_results = []
+        # Step 2: Extract key terms from the query
+        query_terms = self.extract_query_terms(query)
+        self.logger.log_event("query_terms", {"terms": query_terms})
+        
+        # Step 3: Identify relevant regulations using the knowledge base
+        regions = query_analysis.get("regions", [])
+        relevant_regulations = self.reg_knowledge.get_relevant_regulations(query_terms, regions)
+        self.logger.log_event("relevant_regulations", {"regulations": relevant_regulations})
+        
+        # Step 4: Get specialized search terms for interregs.net
+        interregs_terms = self.reg_knowledge.get_interregs_search_terms(query_terms)
+        self.logger.log_event("interregs_search_terms", {"terms": interregs_terms})
+        
+        # Step 5: Try to get information from interregs.net first
         interregs_content = ""
         interregs_sources = []
         
         try:
-            # Make search query based on terms from the analysis
-            search_terms = []
-            if "regulation_types" in query_analysis:
-                search_terms.extend(query_analysis["regulation_types"])
-            if "vehicle_categories" in query_analysis:
-                search_terms.extend(query_analysis["vehicle_categories"])
-            if "technical_parameters" in query_analysis:
-                search_terms.extend(query_analysis["technical_parameters"])
-                
-            # Add the original query terms
-            search_terms.append(query)
-            
-            # Create a search string
-            search_query = " ".join(search_terms)
-            
-            # Determine region if possible
+            # Map regions to interregs.net format
             region = None
-            if "regions" in query_analysis and query_analysis["regions"]:
+            if regions:
                 region_map = {
-                    "usa": "US", 
-                    "us": "US",
-                    "europe": "EU", 
-                    "eu": "EU",
-                    "uk": "UK", 
-                    "china": "CN",
-                    "japan": "JP", 
-                    "india": "IN",
-                    "canada": "CA", 
-                    "australia": "AU",
-                    "brazil": "BR", 
-                    "korea": "KR",
-                    "russia": "RU", 
-                    "mexico": "MX",
-                    "south africa": "ZA", 
-                    "argentina": "AR"
+                    "usa": "US", "us": "US", "united states": "US",
+                    "europe": "EU", "eu": "EU", "european union": "EU",
+                    "uk": "UK", "united kingdom": "UK", 
+                    "china": "CN", "japan": "JP", "india": "IN",
+                    "canada": "CA", "australia": "AU", "brazil": "BR", 
+                    "korea": "KR", "south korea": "KR",
+                    "russia": "RU", "mexico": "MX",
+                    "south africa": "ZA", "argentina": "AR"
                 }
                 
-                for r in query_analysis["regions"]:
-                    if r.lower() in region_map:
-                        region = region_map[r.lower()]
+                for r in regions:
+                    r_lower = r.lower()
+                    if r_lower in region_map:
+                        region = region_map[r_lower]
                         break
             
-            # Search interregs
-            self.logger.log_event("searching_interregs", {"query": search_query, "region": region})
-            interregs_results = self.interregs_client.search_regulations(search_query, region)
+            # Try each search term in sequence
+            interregs_results = []
+            for search_term in interregs_terms[:3]:  # Limit to top 3 terms
+                if time.time() > end_time - 30:  # Leave at least 30 seconds for the rest of processing
+                    self.logger.log_event("timeout", {"phase": "interregs_search"})
+                    break
+                    
+                # Search interregs
+                self.logger.log_event("searching_interregs", {"query": search_term, "region": region})
+                results = self.interregs_client.search_regulations(search_term, region)
+                interregs_results.extend(results)
+                
+                # If we found at least 2 relevant results, stop searching
+                if len(results) >= 2:
+                    break
             
             # Get content from top 3 most relevant results
             for result in interregs_results[:3]:
-                if time.time() > end_time:
+                if time.time() > end_time - 20:  # Leave 20 seconds for response generation
                     self.logger.log_event("timeout", {"phase": "interregs_content_fetch"})
                     break
                     
@@ -516,43 +551,78 @@ ANSWER:""",
         except Exception as e:
             self.logger.log_error(f"Error accessing Interregs: {str(e)}")
         
-        # Step 3: Get content from other regulatory sources if needed
+        # Step 6: Get direct URLs for specific regulations from our knowledge base
+        regulation_urls = self.reg_knowledge.get_regulation_urls(relevant_regulations)
+        
+        # Step 7: Try to fetch content from specific regulation URLs
         web_sources = []
         
-        if len(interregs_sources) < 2 and time.time() <= end_time:
-            # Select relevant sources
-            relevant_source_ids = self._select_sources(query_analysis)
-            self.logger.log_event("selected_sources", {"sources": relevant_source_ids})
-            
-            # Only process top 3 sources to speed things up
-            for source_id in relevant_source_ids[:3]:
-                # Check timeout
-                if time.time() > end_time:
-                    self.logger.log_event("timeout", {"phase": "document_retrieval"})
+        if len(interregs_sources) < 2 and time.time() <= end_time - 20 and regulation_urls:
+            for url in regulation_urls[:3]:  # Limit to top 3 URLs
+                if time.time() > end_time - 15:
+                    self.logger.log_event("timeout", {"phase": "regulation_url_fetch"})
                     break
-                    
-                source_info = self.reg_sources[source_id]
-                # Set a timeout for each source retrieval (10 seconds)
-                try:
-                    documents = self.crawler.retrieve_documents_with_timeout(
-                        source_info["base_url"],
-                        source_info["doc_patterns"],
-                        query_analysis,
-                        timeout=10
-                    )
                 
-                    # Process and collect documents
-                    for doc in documents:
+                try:
+                    content = self.crawler.fetch_url(url, verify_ssl=False)  # Skip SSL verification for government sites
+                    if content:
+                        title = self.crawler._extract_document_title(content) or f"Regulation at {url}"
                         web_sources.append({
-                            "title": doc["title"],
-                            "url": doc["url"],
-                            "source": source_info["name"],
-                            "content": doc["content"]
+                            "title": title,
+                            "url": url,
+                            "source": "Direct Regulatory Source",
+                            "content": content
                         })
                 except Exception as e:
-                    self.logger.log_error(f"Error retrieving documents from {source_id}: {str(e)}")
+                    self.logger.log_error(f"Error fetching regulation URL {url}: {str(e)}")
         
-        # Step 4: Combine all sources and generate response
+        # Step 8: If still not enough content, try selected regulatory bodies
+        if len(interregs_sources) + len(web_sources) < 2 and time.time() <= end_time - 15:
+            # Get regulatory body URLs based on the relevant regulations
+            bodies = ["NHTSA", "UNECE", "ECE", "EU", "Transport Canada"]
+            body_urls = self.reg_knowledge.get_regulatory_body_urls(bodies)
+            
+            # Only try a few regulatory bodies
+            for url in body_urls[:2]:
+                if time.time() > end_time - 10:
+                    self.logger.log_event("timeout", {"phase": "regulatory_body_fetch"})
+                    break
+                
+                try:
+                    content = self.crawler.fetch_url(url, verify_ssl=False)
+                    if content:
+                        # Extract title
+                        title = self.crawler._extract_document_title(content) or f"Regulatory Body at {url}"
+                        
+                        # Try to find relevant sections in the content related to our query terms
+                        soup = BeautifulSoup(content, 'html.parser')
+                        
+                        # Look for sections containing our query terms
+                        relevant_sections = []
+                        for term in query_terms:
+                            # Find elements containing the term
+                            for element in soup.find_all(string=lambda text: term.lower() in text.lower()):
+                                # Get the parent element to capture context
+                                parent = element.parent
+                                if parent:
+                                    relevant_sections.append(parent.get_text())
+                        
+                        # Use either the relevant sections or the full content
+                        if relevant_sections:
+                            filtered_content = "\n\n".join(relevant_sections)
+                        else:
+                            filtered_content = content
+                        
+                        web_sources.append({
+                            "title": title,
+                            "url": url,
+                            "source": "Regulatory Body",
+                            "content": filtered_content
+                        })
+                except Exception as e:
+                    self.logger.log_error(f"Error fetching regulatory body URL {url}: {str(e)}")
+        
+        # Step 9: Combine all sources and generate response
         all_sources = interregs_sources + [{"title": s["title"], "url": s["url"], "source": s["source"]} for s in web_sources]
         
         # Create context from all sources
@@ -566,7 +636,7 @@ ANSWER:""",
             self.logger.log_performance(query, time.time() - start_time, False)
             return response, []
         
-        # Generate response using Groq API directly
+        # Step 10: Generate response using Groq API directly
         prompt = self.mcp_config["prompt_templates"]["response_generation"].format(
             query=query,
             context=context
