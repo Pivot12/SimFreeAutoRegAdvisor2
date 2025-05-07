@@ -302,12 +302,12 @@ ANSWER:""",
             prompt = self.mcp_config["prompt_templates"]["query_analysis"].format(query=query)
             
             headers = {
-                "Authorization": f"Bearer {self.groq_api_key}",
+                "Authorization": f"Bearer {self.cerebras_api_key}",
                 "Content-Type": "application/json"
             }
             
             response = requests.post(
-                "https://api.groq.com/openai/v1/chat/completions",
+                "https://api.cerebras.io/v1/chat/completions",
                 headers=headers,
                 json={
                     "model": self.model,
