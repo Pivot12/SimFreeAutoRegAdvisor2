@@ -2,6 +2,7 @@ import os
 import time
 import random
 import re
+import urllib3
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 import requests
@@ -13,6 +14,7 @@ import chardet
 from tika import parser
 from playwright.sync_api import sync_playwright
 from logger import Logger
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class AutoRegulationCrawler:
     """
