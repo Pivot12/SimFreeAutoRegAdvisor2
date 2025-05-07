@@ -264,7 +264,7 @@ ANSWER:""",
                 embedding = response.data[0].embedding
             except (AttributeError, TypeError):
                 # Fallback to direct API call if client method not available
-                endpoint = "https://api.cerebras.io/v1/embeddings"
+                endpoint = "https://api.cerebras.net/v1/embeddings"
                 headers = {
                     "Authorization": f"Bearer {self.cerebras_api_key}",
                     "Content-Type": "application/json"
@@ -307,7 +307,7 @@ ANSWER:""",
             }
             
             response = requests.post(
-                "https://api.cerebras.io/v1/chat/completions",
+                "https://api.cerebras.net/v1/chat/completions",
                 headers=headers,
                 json={
                     "model": self.model,
@@ -714,7 +714,7 @@ ANSWER:""",
             }
             
             response = requests.post(
-                "https://api.cerebras.io/v1/chat/completions",
+                "https://api.cerebras.net/v1/chat/completions",
                 headers=headers,
                 json={
                     "model": "llama-4-scout-32b",
