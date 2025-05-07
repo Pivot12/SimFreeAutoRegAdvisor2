@@ -261,4 +261,4 @@ with st.expander("Admin Panel", expanded=False):
 
 # Footer
 st.markdown("---")
-st.caption("Automotive Regulations AI Assistant • Built with Groq + Llama model")
+st.caption("Automotive Regulations AI Assistant • Built with Cerebras + Llama 4 Scout")
