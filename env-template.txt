@@ -1,0 +1,17 @@
+# API Keys
+FIRECRAWL_API_KEY=your_firecrawl_api_key_here
+CEREBRAS_API_KEY=your_cerebras_api_key_here
+
+# Logging Configuration
+# Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+LOG_LEVEL=INFO
+
+# Model Context Protocol Configuration
+# Set to False to disable MCP
+MCP_ENABLED=True
+MCP_PORT=3000
+MCP_HOST=localhost
+
+# Model Configuration
+TEMPERATURE=0.1
+MAX_TOKENS=2048
