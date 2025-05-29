@@ -32,9 +32,9 @@ MAX_TOKENS = 2048
 
 # Firecrawl API configuration
 FIRECRAWL_BASE_URL = "https://api.firecrawl.dev/v1"
-MAX_SITES_PER_QUERY = 5
-MAX_RESULTS_PER_SITE = 3
-CRAWL_DEPTH = 2
+MAX_SITES_PER_QUERY = 3  # Reduced from 5 to avoid timeouts
+MAX_RESULTS_PER_SITE = 2  # Reduced from 3 to avoid timeouts
+CRAWL_DEPTH = 1  # Reduced from 2 to avoid timeouts
 
 # File paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -46,63 +46,27 @@ LEARNING_CACHE_PATH = os.path.join(DATA_DIR, "learning_cache.json")
 os.makedirs(DATA_DIR, exist_ok=True)
 
 # Model Context Protocol configuration
-MCP_ENABLED = True
+# Disable MCP server for cloud deployment to avoid port conflicts
+IS_CLOUD_DEPLOYMENT = os.getenv("STREAMLIT_CLOUD") or "STREAMLIT" in os.environ
+MCP_ENABLED = False if IS_CLOUD_DEPLOYMENT else True
 MCP_PORT = 3000
 MCP_HOST = "localhost"
 
-# List of regulatory websites to search
+# List of regulatory websites to search (simplified for better reliability)
 REGULATORY_WEBSITES = [
-    # Global
-    "https://unece.org/transport/vehicle-regulations",
-    "https://www.iatf.com/",
-    "https://www.iso.org/iso-15288.html",
-    
-    # European Union
-    "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32018R0858",
-    "https://www.acea.auto/publication/automotive-regulatory-guide-2023/",
-    "https://ec.europa.eu/growth/sectors/automotive-industry_en",
-    
-    # United States
+    # Focus on more reliable sources first
     "https://www.nhtsa.gov/laws-regulations",
     "https://www.epa.gov/regulations-emissions-vehicles-and-engines",
-    "https://www.fmcsa.dot.gov/regulations",
+    "https://ec.europa.eu/growth/sectors/automotive-industry_en",
+    "https://unece.org/transport/vehicle-regulations",
+    "https://www.acea.auto/publication/automotive-regulatory-guide-2023/",
     
-    # United Kingdom
+    # Additional sources (will be used if the above don't provide enough data)
     "https://www.vehicle-certification-agency.gov.uk/",
     "https://www.gov.uk/government/organisations/department-for-transport",
-    
-    # China
-    "http://english.mee.gov.cn/",
-    "http://www.miit.gov.cn/",
-    
-    # Japan
     "https://www.mlit.go.jp/en/",
-    "https://www.jama-english.jp/",
-    
-    # India
     "https://morth.nic.in/",
-    "https://www.arai.co.in/",
-    
-    # Australia
     "https://www.infrastructure.gov.au/infrastructure-transport-vehicles/vehicles/vehicle-design-regulation",
-    
-    # Brazil
-    "https://www.gov.br/infraestrutura/pt-br",
-    
-    # Russia
-    "https://www.rst.gov.ru/portal/gost",
-    
-    # South Korea
-    "https://www.kotsa.or.kr/eng/index.do",
-    
-    # Homologation services and testing organizations
-    "https://www.tuv.com/world/en/car-registration-homologation.html",
-    "https://www.dekra.com/en/homologation-and-type-approvals/",
-    "https://www.ul.com/services/automotive-regulatory-and-homologation-advisory-services",
-    "https://www.sgs.com/en/transportation/automotive/statutory-and-optional-services/global-market-access/homologation",
-    "https://www.intertek.com/automotive/homologation/",
-    "https://www.utac.com/your-needs/type-approval/",
-    "https://www.csa-group.org/en-us/services/transportation-and-mobility-services/",
 ]
 
 # Error messages
@@ -111,6 +75,7 @@ ERROR_MESSAGES = {
     "cerebras_api_error": "Error connecting to the Cerebras API. Please check your API key and try again.",
     "no_data_found": "No relevant regulation data found for this query. Please try a different query or be more specific.",
     "general_error": "An unexpected error occurred. Please try again later.",
+    "api_key_missing": "API keys are not configured. Please check your configuration.",
 }
 
 # Logging configuration
@@ -122,3 +87,9 @@ LOG_LEVELS = {
     "CRITICAL": 50,
 }
 LOG_LEVEL = LOG_LEVELS.get(os.getenv("LOG_LEVEL", "INFO"), 20)
+
+# Debug information
+print(f"Firecrawl API Key configured: {'Yes' if FIRECRAWL_API_KEY and FIRECRAWL_API_KEY != 'YOUR_FIRECRAWL_API_KEY' else 'No'}")
+print(f"Cerebras API Key configured: {'Yes' if CEREBRAS_API_KEY and CEREBRAS_API_KEY != 'YOUR_CEREBRAS_API_KEY' else 'No'}")
+print(f"MCP Enabled: {MCP_ENABLED}")
+print(f"Cloud Deployment: {IS_CLOUD_DEPLOYMENT}")
