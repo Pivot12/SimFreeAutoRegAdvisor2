@@ -426,14 +426,30 @@ def clean_regulatory_text(text: str) -> str:
     Returns:
         Cleaned text
     """
+    if not text:
+        return ""
+    
     # Remove excessive whitespace
     text = re.sub(r'\n\s*\n', '\n\n', text)
     text = re.sub(r' +', ' ', text)
     
-    # Remove common navigation/footer elements
-    # Moved to separate variable for clarity:
-    nav_pattern = r'(Cookie|Privacy|Terms|Contact|Navigation|Menu|Search|Login).*$'
-    text = re.sub(nav_pattern, '', text, flags=re.IGNORECASE | re.MULTILINE)
+    # Remove common navigation/footer elements - simplified approach
+    nav_words = ['Cookie', 'Privacy', 'Terms', 'Contact', 'Navigation', 'Menu', 'Search', 'Login']
+    for word in nav_words:
+        text = re.sub(f'{word}.*$', '', text, flags=re.IGNORECASE | re.MULTILINE)
+    
+    # Remove URLs - simplified approach
+    text = re.sub(r'https?://[^\s]+', '', text)
+    
+    # Clean up markdown artifacts
+    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+    text = re.sub(r'[*_]{1,2}([^*_]+)[*_]{1,2}', r'\1', text)
+    
+    # Remove excessive punctuation
+    text = re.sub(r'[.]{3,}', '...', text)
+    text = re.sub(r'[-]{3,}', '---', text)
+    
+    return text.strip()
 
 def extract_region_from_query(query: str) -> str:
     """Extract region information from query for Interregs search."""
