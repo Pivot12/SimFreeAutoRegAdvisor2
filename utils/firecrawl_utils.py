@@ -105,7 +105,47 @@ def create_mock_regulation_data(query: str) -> Tuple[List[str], List[str], List[
     mock_urls = []
     mock_titles = []
     
-    if "emissions" in query_lower:
+    if "emissions" in query_lower or "fuel" in query_lower:
+        mock_data.append("""
+# US Fuel Regulations and Standards
+
+## Legal Fuel Types for Passenger Cars in the United States
+
+### Gasoline (Petrol)
+- **Regular Unleaded**: Minimum 87 octane rating (most common)
+- **Mid-Grade**: 89-90 octane rating  
+- **Premium**: 91+ octane rating
+- Must contain minimum 10% ethanol (E10) in most areas
+- Maximum 15% ethanol (E15) approved for 2001+ vehicles
+
+### Diesel Fuel
+- **Ultra Low Sulfur Diesel (ULSD)**: Maximum 15 ppm sulfur content
+- Required for all highway diesel vehicles since 2007
+- Must meet ASTM D975 specifications
+
+### Alternative Fuels (EPA Approved)
+- **E85 (Ethanol)**: 85% ethanol blend for flex-fuel vehicles
+- **Compressed Natural Gas (CNG)**: Must meet ASTM D6606 standards
+- **Liquefied Petroleum Gas (LPG/Propane)**: HD-5 grade propane
+- **Hydrogen**: For fuel cell vehicles, must meet SAE J2719 purity standards
+
+### Electric Power
+- Battery electric vehicles (BEVs) using grid electricity
+- Plug-in hybrid electric vehicles (PHEVs)
+
+## Key Regulatory Requirements
+- All fuels must be EPA registered and certified
+- Fuel distributors must meet Clean Air Act requirements
+- Regional fuel variations may apply (e.g., California CARB standards)
+- Renewable Fuel Standard (RFS) mandates minimum biofuel content
+
+## State-Specific Considerations
+- California has additional Air Resources Board (CARB) fuel standards
+- Some states have specific biodiesel blending requirements
+- Winter/summer fuel blends vary by region
+        """)
+        mock_urls.append("https://www.epa.gov/regulations-emissions-vehicles-and-engines")
+        mock_titles.append("EPA Vehicle Emissions Standards and Fuel Regulations")
         mock_data.append("""
 # Emissions Standards Overview
 
