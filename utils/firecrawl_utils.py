@@ -17,7 +17,7 @@ def fetch_regulation_data(
     Args:
         query: User query about automotive regulations
         websites: List of regulatory websites to search
-        api_key: fc-5b9ec38c1f764b7c896696878063e18d
+        api_key: "fc-5b9ec38c1f764b7c896696878063e18d"
     
     Returns:
         Tuple containing:
@@ -28,7 +28,7 @@ def fetch_regulation_data(
     logger.info(f"Fetching regulation data for query: {query}")
     
     # Check if API key is configured
-    if not api_key or api_key == "YOUR_FIRECRAWL_API_KEY":
+    if not api_key or api_key == "fc-5b9ec38c1f764b7c896696878063e18d":
         logger.error("Firecrawl API key not configured")
         # Return mock data for demonstration
         return create_mock_regulation_data(query)
