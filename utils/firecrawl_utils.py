@@ -431,10 +431,140 @@ def clean_regulatory_text(text: str) -> str:
     text = re.sub(r' +', ' ', text)
     
     # Remove common navigation/footer elements
-    text = re.sub(r'(Cookie|Privacy|Terms|Contact|Navigation|Menu|Search|Login).*$', '', text, flags=re.IGNORECASE | re.MULTILINE)
+    text = re.sub(r'(Cookie|Privacy|Terms|Contact|Navigation|Menu|Search|Login).*
+
+def extract_region_from_query(query: str) -> str:
+    """Extract region information from query for Interregs search."""
+    query_lower = query.lower()
     
-    # Remove URLs that are not regulation references
-    text = re.sub(r'https?://[^\s]+(?<!\.pdf)(?<!regulations?)(?<!directive)', '', text)
+    if any(term in query_lower for term in ['us', 'usa', 'united states', 'america']):
+        return 'US'
+    elif any(term in query_lower for term in ['eu', 'europe', 'european']):
+        return 'EU'
+    elif 'japan' in query_lower:
+        return 'Japan'
+    elif 'china' in query_lower:
+        return 'China'
+    elif any(term in query_lower for term in ['uk', 'britain', 'british']):
+        return 'UK'
+    elif 'india' in query_lower:
+        return 'India'
+    elif 'australia' in query_lower:
+        return 'Australia'
+    else:
+        return 'Global'
+
+def extract_category_from_query(query: str) -> str:
+    """Extract category information from query for Interregs search."""
+    query_lower = query.lower()
+    
+    if any(term in query_lower for term in ['emission', 'exhaust', 'co2', 'pollution']):
+        return 'Emissions'
+    elif any(term in query_lower for term in ['safety', 'crash', 'protection']):
+        return 'Safety'
+    elif any(term in query_lower for term in ['homologation', 'type approval', 'certification']):
+        return 'Homologation'
+    elif any(term in query_lower for term in ['electric', 'ev', 'battery']):
+        return 'Electric Vehicles'
+    elif any(term in query_lower for term in ['fuel', 'gasoline', 'diesel']):
+        return 'Fuel'
+    elif any(term in query_lower for term in ['noise', 'sound']):
+        return 'Noise'
+    elif any(term in query_lower for term in ['light', 'lamp', 'illumination']):
+        return 'Lighting'
+    else:
+        return 'General'
+
+def prepare_search_terms(query: str) -> List[str]:
+    """
+    Prepare search terms based on user query.
+    Extract key phrases and keywords for regulation search.
+    
+    Args:
+        query: The user's query about automotive regulations
+    
+    Returns:
+        List of search terms
+    """
+    # Remove common words and split query into terms
+    common_words = ["what", "is", "are", "the", "for", "a", "an", "in", "on", "about", "how", "can", "do", "does"]
+    terms = query.lower().split()
+    terms = [term for term in terms if term not in common_words and len(term) > 2]
+    
+    # Add specific regulation terminology
+    regulation_terms = ["regulation", "standard", "directive", "requirement", "law", "homologation", "type approval"]
+    region_terms = ["eu", "european", "us", "united states", "uk", "japan", "china", "global", "international"]
+    
+    # Find any specific regulation codes mentioned (e.g., ECE-R100)
+    reg_codes = re.findall(r'[A-Z]{1,5}[-]\d{1,4}', query)
+    
+    # Combine all search terms
+    search_terms = terms + regulation_terms + region_terms + reg_codes
+    
+    # Remove duplicates
+    search_terms = list(set(search_terms))
+    
+    return search_terms
+
+def scrape_website(url: str, api_key: str) -> Dict[str, Any]:
+    """
+    Scrape a website using Firecrawl API.
+    
+    Args:
+        url: Website URL to scrape
+        api_key: Firecrawl API key
+    
+    Returns:
+        Dictionary containing the scraped content
+    """
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}"
+    }
+    
+    # Simplified data payload - removed extractorOptions that was causing 400 error
+    data = {
+        "url": url,
+        "formats": ["markdown"],
+        "timeout": 30000  # Timeout in milliseconds (30 seconds)
+    }
+    
+    try:
+        response = requests.post(
+            f"{FIRECRAWL_BASE_URL}/scrape",
+            headers=headers,
+            json=data,
+            timeout=30  # Request timeout
+        )
+        
+        if response.status_code != 200:
+            logger.error(f"Error scraping {url}: {response.status_code} - {response.text}")
+            raise Exception(f"Firecrawl API error: {response.status_code}")
+        
+        result = response.json()
+        
+        # Check if the response contains data
+        if "data" in result:
+            return result["data"]
+        else:
+            return result
+    
+    except requests.exceptions.Timeout:
+        logger.error(f"Timeout scraping {url}")
+        raise Exception(f"Timeout scraping {url}")
+    except Exception as e:
+        logger.error(f"Error in scrape_website for {url}: {str(e)}")
+        raise
+, '', text, flags=re.IGNORECASE | re.MULTILINE)
+    
+    # Remove URLs but keep regulation document links (fixed regex - no variable width lookbehind)
+    # First preserve regulation document URLs
+    regulation_urls = re.findall(r'https?://[^\s]*(?:\.pdf|regulation|directive)', text, re.IGNORECASE)
+    # Remove other URLs
+    text = re.sub(r'https?://[^\s]+', '', text)
+    # Add back regulation URLs
+    for url in regulation_urls:
+        text += f"\n{url}"
     
     # Clean up markdown artifacts
     text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)  # Remove markdown links but keep text
