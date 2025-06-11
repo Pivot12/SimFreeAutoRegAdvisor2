@@ -17,7 +17,7 @@ def fetch_regulation_data(
     Args:
         query: User query about automotive regulations
         websites: List of regulatory websites to search
-        api_key: Firecrawl API key
+        api_key: fc-5b9ec38c1f764b7c896696878063e18d
     
     Returns:
         Tuple containing:
