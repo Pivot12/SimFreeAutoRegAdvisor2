@@ -166,8 +166,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Header
-st.markdown("<h1 class='main-header'>Automotive Regulations Advisor</h1>", unsafe_allow_html=True)
-st.markdown("<p class='sub-header'>Ask questions about automotive regulations worldwide and get accurate answers from official sources</p>", unsafe_allow_html=True)
+st.markdown("<h1 class='main-header'>Automotive Regulations AI Agent</h1>", unsafe_allow_html=True)
+st.markdown("<p class='sub-header'>Ask questions about automotive regulations worldwide and get accurate answers from official sources &#40Please contact neelshah0147@gmail.com for any queries&#41</p>", unsafe_allow_html=True)
 
 # Sidebar with stats and information
 with st.sidebar:
