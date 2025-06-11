@@ -199,6 +199,9 @@ def clean_regulatory_answer(answer: str) -> str:
     Returns:
         Cleaned answer
     """
+    if not answer:
+        return ""
+    
     # Remove excessive line breaks
     answer = re.sub(r'\n{3,}', '\n\n', answer)
     
@@ -208,14 +211,13 @@ def clean_regulatory_answer(answer: str) -> str:
     # Fix spacing around numbered lists
     answer = re.sub(r'\n\s*(\d+)\.\s*', r'\n\1. ', answer)
     
-    # Ensure proper spacing after source citations
-    answer = re.sub(r'\[Source\s+\d+\]\s*([A-Z])', r'[Source \1] \2', answer)
+    # Fix spacing after source citations - corrected regex
+    answer = re.sub(r'\[Source\s+(\d+)\]\s*([A-Z])', r'[Source \1] \2', answer)
     
     # Remove redundant whitespace
     answer = re.sub(r' +', ' ', answer)
     
     return answer.strip()
-
 
 def extract_source_indices(text: str) -> List[int]:
     """
