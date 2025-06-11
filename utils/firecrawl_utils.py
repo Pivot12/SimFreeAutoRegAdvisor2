@@ -431,7 +431,9 @@ def clean_regulatory_text(text: str) -> str:
     text = re.sub(r' +', ' ', text)
     
     # Remove common navigation/footer elements
-    text = re.sub(r'(Cookie|Privacy|Terms|Contact|Navigation|Menu|Search|Login).*
+    # Moved to separate variable for clarity:
+    nav_pattern = r'(Cookie|Privacy|Terms|Contact|Navigation|Menu|Search|Login).*$'
+    text = re.sub(nav_pattern, '', text, flags=re.IGNORECASE | re.MULTILINE)
 
 def extract_region_from_query(query: str) -> str:
     """Extract region information from query for Interregs search."""
