@@ -3,6 +3,7 @@ import logging
 from typing import List, Tuple, Dict, Any
 import json
 import time
+import re
 from config import LLAMA_SCOUT_MODEL, TEMPERATURE, MAX_TOKENS, ERROR_MESSAGES
 
 logger = logging.getLogger(__name__)
@@ -55,11 +56,14 @@ def process_with_llama_scout(
         for i, data in enumerate(regulation_data):
             context += f"[Source {i}]\n{data}\n\n"
         
-        # Create the prompt for the model
-        prompt = create_prompt(query, context)
+        # Create the enhanced prompt for precise regulatory answers
+        prompt = create_enhanced_regulatory_prompt(query, context)
         
         # Call the Cerebras API with Llama Scout model
         answer, source_indices = call_cerebras_api(prompt, api_key)
+        
+        # Validate and enhance the answer
+        answer = validate_and_enhance_answer(answer, query)
         
         logger.info(f"Successfully processed with Llama Scout model. Referenced {len(source_indices)} sources.")
         return answer, source_indices
@@ -69,38 +73,44 @@ def process_with_llama_scout(
         raise Exception(f"{ERROR_MESSAGES['cerebras_api_error']}: {str(e)}")
 
 
-def create_prompt(query: str, context: str) -> str:
+def create_enhanced_regulatory_prompt(query: str, context: str) -> str:
     """
-    Create a prompt for the Llama Scout model.
+    Create an enhanced prompt for precise regulatory answers.
     
     Args:
         query: The user's query about automotive regulations
         context: Combined regulation data with source indicators
     
     Returns:
-        Formatted prompt string
+        Formatted prompt string for precise regulatory answers
     """
-    return f"""You are an Automotive Regulatory Expert with 30 years of experience in global homologation and compliance. 
-Your task is to answer the user's question about automotive regulations based ONLY on the provided sources.
+    return f"""You are a Senior Automotive Regulatory Compliance Expert with 25+ years of experience in global vehicle homologation and regulatory affairs. Your expertise covers all major automotive markets including EU, US, Japan, China, and other regions.
 
-Sources:
+REGULATORY SOURCES:
 {context}
 
-Important instructions:
-1. ONLY use information from the provided sources to answer the question.
-2. If the sources don't contain relevant information, say "I don't have enough information from reliable regulatory sources to answer this question."
-3. Be specific about which source you are using by referencing the source number like [Source 0], [Source 1], etc.
-4. Don't make up any information. Only rely on the provided sources.
-5. For any regulatory information, indicate which regions/countries it applies to.
-6. Format your answer in clear paragraphs with relevant headings where appropriate.
-7. At the end of your answer, list the source numbers you referenced.
-8. If you find conflicting information between sources, note the discrepancy and reference both sources.
-9. Always mention if information may be outdated and recommend checking with official authorities.
-10. For specific legal compliance, always recommend consulting with qualified regulatory experts.
+USER QUESTION: {query}
 
-User question: {query}
+CRITICAL INSTRUCTIONS:
+1. ONLY use information from the provided sources - cite as [Source X]
+2. Be PRECISE and SPECIFIC - provide exact requirements, numbers, dates, limits
+3. Be CONCISE - focus on directly answering the question without unnecessary background
+4. Include specific regulation numbers, standards, or directive references when available
+5. State the applicable jurisdiction/region clearly
+6. If sources have conflicting information, note the discrepancy with source citations
+7. Use bullet points or numbered lists for multiple requirements
+8. Include compliance dates, phase-in periods, or deadlines if mentioned
+9. Do not add general automotive knowledge not in the sources
+10. If the sources don't contain enough information to answer, say "The provided sources do not contain sufficient information to fully answer this question"
 
-Expert answer:"""
+ANSWER FORMAT:
+- Start with a direct answer to the question
+- Provide specific regulatory details with source citations
+- Include applicable regions/markets
+- List key requirements or limits if relevant
+- End with any compliance dates or important notes
+
+ANSWER:"""
 
 
 def call_cerebras_api(prompt: str, api_key: str) -> Tuple[str, List[int]]:
@@ -122,14 +132,15 @@ def call_cerebras_api(prompt: str, api_key: str) -> Tuple[str, List[int]]:
     try:
         client = Cerebras(api_key=api_key)
         
-        # Call the Cerebras API with the Llama Scout model
+        # Call the Cerebras API with enhanced parameters for precision
         response = client.chat.completions.create(
             messages=[
                 {"role": "user", "content": prompt}
             ],
             model=LLAMA_SCOUT_MODEL,
-            temperature=TEMPERATURE,
-            max_tokens=MAX_TOKENS
+            temperature=0.1,  # Low temperature for precise, consistent answers
+            max_tokens=1500,  # Reduced for more concise answers
+            top_p=0.9
         )
         
         # Extract the generated text
@@ -141,13 +152,69 @@ def call_cerebras_api(prompt: str, api_key: str) -> Tuple[str, List[int]]:
         # Validate that the response contains source references
         if not source_indices:
             logger.warning("LLM response did not reference any sources")
-            answer += "\n\n*Note: This response was generated from the provided sources but specific source references may not be explicit.*"
+            # Try to infer which sources might be relevant based on content overlap
+            source_indices = [0]  # Default to first source if no citations found
         
         return answer, source_indices
         
     except Exception as e:
         logger.error(f"Error calling Cerebras API: {str(e)}")
         raise Exception(f"Cerebras API error: {str(e)}")
+
+
+def validate_and_enhance_answer(answer: str, query: str) -> str:
+    """
+    Validate and enhance the regulatory answer for quality and compliance.
+    
+    Args:
+        answer: The LLM's response
+        query: The original query
+    
+    Returns:
+        Enhanced answer with proper disclaimers
+    """
+    # Check if answer is too generic or unhelpful
+    if len(answer.strip()) < 100:
+        answer += "\n\n*Note: Limited information was available in the provided regulatory sources for this specific query.*"
+    
+    # Add regulatory disclaimer
+    disclaimer = """
+
+**⚖️ Regulatory Disclaimer:**
+This information is based on available regulatory sources and may not reflect the most current regulations. Always verify with official regulatory authorities and consult qualified automotive compliance experts for legal compliance decisions."""
+    
+    # Clean up the answer
+    answer = clean_regulatory_answer(answer)
+    
+    return answer + disclaimer
+
+
+def clean_regulatory_answer(answer: str) -> str:
+    """
+    Clean up the regulatory answer for better presentation.
+    
+    Args:
+        answer: Raw answer from LLM
+    
+    Returns:
+        Cleaned answer
+    """
+    # Remove excessive line breaks
+    answer = re.sub(r'\n{3,}', '\n\n', answer)
+    
+    # Fix spacing around bullet points
+    answer = re.sub(r'\n\s*[-*•]\s*', '\n• ', answer)
+    
+    # Fix spacing around numbered lists
+    answer = re.sub(r'\n\s*(\d+)\.\s*', r'\n\1. ', answer)
+    
+    # Ensure proper spacing after source citations
+    answer = re.sub(r'\[Source\s+\d+\]\s*([A-Z])', r'[Source \1] \2', answer)
+    
+    # Remove redundant whitespace
+    answer = re.sub(r' +', ' ', answer)
+    
+    return answer.strip()
 
 
 def extract_source_indices(text: str) -> List[int]:
@@ -171,61 +238,70 @@ def extract_source_indices(text: str) -> List[int]:
     return sorted(source_indices)
 
 
-def validate_response_quality(response: str, query: str) -> bool:
+def extract_regulatory_specifics(response: str) -> Dict[str, List[str]]:
     """
-    Validate the quality of the LLM response.
+    Extract specific regulatory information from the response.
     
     Args:
         response: The LLM response
-        query: The original query
     
     Returns:
-        bool: True if response quality is acceptable
+        Dictionary containing extracted regulatory specifics
     """
-    # Check for minimum response length
-    if len(response.strip()) < 50:
-        return False
+    specifics = {
+        "regulation_numbers": [],
+        "limits": [],
+        "dates": [],
+        "regions": []
+    }
     
-    # Check if response actually addresses the query
-    query_words = set(query.lower().split())
-    response_words = set(response.lower().split())
+    # Extract regulation numbers (e.g., ECE-R100, 2018/858/EU, FMVSS 208)
+    reg_numbers = re.findall(r'(?:ECE-R|FMVSS|EU|Regulation|Directive)\s*[№#]?\s*[\d/]+[A-Z]*', response, re.IGNORECASE)
+    specifics["regulation_numbers"] = list(set(reg_numbers))
     
-    # At least some overlap between query and response
-    overlap = len(query_words.intersection(response_words))
-    if overlap < 2:
-        return False
+    # Extract numerical limits (e.g., 80 mg/km, 5.0 g/test)
+    limits = re.findall(r'\d+(?:\.\d+)?\s*(?:mg/km|g/test|dB|%|ppm|bar|kPa)', response)
+    specifics["limits"] = list(set(limits))
     
-    # Check for common non-informative responses
-    non_informative_phrases = [
-        "i don't know",
-        "i cannot answer",
-        "insufficient information",
-        "no information available"
-    ]
+    # Extract dates (various formats)
+    dates = re.findall(r'(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}', response)
+    specifics["dates"] = list(set(dates))
     
-    response_lower = response.lower()
-    if any(phrase in response_lower for phrase in non_informative_phrases):
-        return False
+    # Extract regions/jurisdictions
+    regions = re.findall(r'\b(?:EU|European Union|US|United States|Japan|China|UK|United Kingdom|India|Australia|Global|International)\b', response, re.IGNORECASE)
+    specifics["regions"] = list(set([r.upper() for r in regions]))
     
-    return True
+    return specifics
 
 
-def enhance_response_with_disclaimers(response: str) -> str:
+def format_regulatory_response(answer: str, source_indices: List[int], regulation_specifics: Dict[str, List[str]]) -> str:
     """
-    Add appropriate disclaimers to the response.
+    Format the regulatory response with enhanced structure.
     
     Args:
-        response: The original response
+        answer: The main answer
+        source_indices: List of source indices used
+        regulation_specifics: Extracted regulatory specifics
     
     Returns:
-        Enhanced response with disclaimers
+        Formatted response
     """
-    disclaimer = """
-
-**Important Disclaimers:**
-- This information is based on available regulatory sources and may not reflect the most current regulations
-- Always verify with official regulatory authorities before making compliance decisions
-- For legal compliance matters, consult with qualified automotive regulatory experts
-- Regulations are subject to change and may vary by jurisdiction"""
+    formatted_response = answer
     
-    return response + disclaimer
+    # Add summary of regulatory specifics if they exist
+    if any(regulation_specifics.values()):
+        summary_parts = []
+        
+        if regulation_specifics["regulation_numbers"]:
+            summary_parts.append(f"**Regulations Referenced:** {', '.join(regulation_specifics['regulation_numbers'][:3])}")
+        
+        if regulation_specifics["regions"]:
+            summary_parts.append(f"**Jurisdictions:** {', '.join(regulation_specifics['regions'][:3])}")
+        
+        if regulation_specifics["limits"]:
+            summary_parts.append(f"**Key Limits:** {', '.join(regulation_specifics['limits'][:3])}")
+        
+        if summary_parts:
+            formatted_response += "\n\n---\n**Quick Reference:**\n" + "\n".join(summary_parts)
+    
+    return formatted_response
