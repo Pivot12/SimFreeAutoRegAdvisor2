@@ -290,8 +290,7 @@ def scrape_website(url: str, api_key: str) -> Dict[str, Any]:
     data = {
         "url": url,
         "formats": ["markdown"],
-        "withMetadata": True,
-        "timeout": 30  # Add timeout to prevent hanging
+        "timeout": 30000  # Timeout in milliseconds (30 seconds)
     }
     
     try:
