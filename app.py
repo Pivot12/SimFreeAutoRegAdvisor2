@@ -21,7 +21,7 @@ from config import (
 
 # Set page configuration
 st.set_page_config(
-    page_title="Auto Regulation Advisor",
+    page_title="Auto Regulations AI Agent",
     page_icon="🚗",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -127,13 +127,19 @@ st.markdown("""
         background-color: #DC2626;
         color: white;
     }
+    .source-container {
+        margin-top: 1rem;
+        padding-top: 1rem;
+        border-top: 1px solid #E5E7EB;
+    }
     .source-link {
-        font-size: 0.8rem;
+        font-size: 0.9rem;
         color: #6B7280;
-        margin-top: 0.5rem;
+        margin: 0.25rem 0;
     }
     .source-title {
         font-weight: bold;
+        color: #374151;
     }
     .stButton>button {
         width: 100%;
@@ -218,8 +224,8 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
 # Main interface
-def display_message(message, message_type="assistant"):
-    """Display a chat message with appropriate styling."""
+def display_chat_message(message, message_type="assistant"):
+    """Display a chat message with proper styling and source links."""
     if message_type == "user":
         css_class = "user-message"
         avatar_class = "user-avatar"
@@ -233,24 +239,35 @@ def display_message(message, message_type="assistant"):
         avatar_class = "assistant-avatar"
         avatar_icon = "🚗"
     
-    source_html = message.get("source_html", "") if isinstance(message, dict) else ""
-    content = message.get("content", message) if isinstance(message, dict) else message
+    # Extract content and sources
+    if isinstance(message, dict):
+        content = message.get("content", "")
+        source_urls = message.get("source_urls", [])
+        source_titles = message.get("source_titles", [])
+    else:
+        content = str(message)
+        source_urls = []
+        source_titles = []
     
+    # Display the main message
     st.markdown(f"""
     <div class='chat-message {css_class}'>
         <div class='message-content'>
             <div class='avatar {avatar_class}'>{avatar_icon}</div>
             <div class='message-text'>{content}</div>
         </div>
-        <div class='source-link'>
-            {source_html}
-        </div>
     </div>
     """, unsafe_allow_html=True)
+    
+    # Display sources separately using Streamlit components
+    if source_urls and source_titles and message_type == "assistant":
+        st.markdown("**Sources:**")
+        for i, (url, title) in enumerate(zip(source_urls, source_titles)):
+            st.markdown(f"🔗 [{title}]({url})")
 
 # Display chat history
 for message in st.session_state.chat_history:
-    display_message(message, message["role"])
+    display_chat_message(message, message["role"])
 
 # User input
 user_query = st.text_input(
@@ -262,105 +279,98 @@ user_query = st.text_input(
 # Process button click
 if st.button("Get Answer") and user_query:
     # Add user query to chat history
-    st.session_state.chat_history.append({"role": "user", "content": user_query})
-    display_message({"role": "user", "content": user_query}, "user")
+    user_message = {"role": "user", "content": user_query}
+    st.session_state.chat_history.append(user_message)
+    display_chat_message(user_message, "user")
     
     # Create a placeholder for the assistant's response
-    response_placeholder = st.empty()
-    with response_placeholder:
-        st.info("🔍 Searching regulatory databases...")
-    
-    # Process the query
-    start_time = time.time()
-    query_successful = False
-    error_message = None
-    answer = ""
-    source_html = ""
-    
-    try:
-        # Use learning cache to prioritize websites based on past success
-        prioritized_websites = list(REGULATORY_WEBSITES.values())
-        if st.session_state.learning_cache["website_success_rates"]:
-            prioritized_websites = sorted(
-                REGULATORY_WEBSITES.values(),
-                key=lambda x: st.session_state.learning_cache["website_success_rates"].get(x.split('/')[2], 0),
-                reverse=True
+    with st.spinner("🔍 Analyzing your query and searching regulatory databases..."):
+        # Process the query
+        start_time = time.time()
+        query_successful = False
+        error_message = None
+        answer = ""
+        source_urls = []
+        source_titles = []
+        
+        try:
+            # Use learning cache to prioritize websites based on past success
+            prioritized_websites = list(REGULATORY_WEBSITES.values())
+            if st.session_state.learning_cache["website_success_rates"]:
+                prioritized_websites = sorted(
+                    REGULATORY_WEBSITES.values(),
+                    key=lambda x: st.session_state.learning_cache["website_success_rates"].get(x.split('/')[2], 0),
+                    reverse=True
+                )
+            
+            # Search for regulation data using Firecrawl API and LLM website selection
+            st.info("🌐 LLM selecting most relevant regulatory websites...")
+            
+            regulation_data, source_urls, source_titles = fetch_regulation_data(
+                user_query, 
+                prioritized_websites,
+                FIRECRAWL_API_KEY
             )
-        
-        # Search for regulation data using Firecrawl API and LLM website selection
-        with response_placeholder:
-            st.info("🌐 Searching selected regulatory websites...")
-        
-        regulation_data, source_urls, source_titles = fetch_regulation_data(
-            user_query, 
-            prioritized_websites,
-            FIRECRAWL_API_KEY
-        )
-        
-        if not regulation_data:
-            raise ValueError(ERROR_MESSAGES["no_data_found"])
-        
-        # Extract relevant regulations
-        with response_placeholder:
-            st.info("📄 Analyzing regulatory content...")
-        
-        relevant_regulations = extract_relevant_regulations(user_query, regulation_data)
-        
-        # Process with Llama Scout using Cerebras API
-        with response_placeholder:
-            st.info("🤖 Processing with AI regulatory expert...")
-        
-        answer, referenced_sources = process_with_llama_scout(
-            user_query,
-            relevant_regulations,
-            CEREBRAS_API_KEY
-        )
-        
-        # Create the source HTML
-        source_html = ""
-        for i, source_idx in enumerate(referenced_sources):
-            if source_idx < len(source_urls):
-                source_html += f"""
-                <p><span class='source-title'>Source {i+1}:</span> 
-                <a href='{source_urls[source_idx]}' target='_blank'>{source_titles[source_idx]}</a></p>
-                """
-        
-        # Update learning cache
-        for source_idx in referenced_sources:
-            if source_idx < len(source_urls):
-                website_domain = source_urls[source_idx].split('/')[2]
-                if website_domain in st.session_state.learning_cache["website_success_rates"]:
-                    st.session_state.learning_cache["website_success_rates"][website_domain] += 1
-                else:
-                    st.session_state.learning_cache["website_success_rates"][website_domain] = 1
-        
-        # Save learning cache
-        with open(LEARNING_CACHE_PATH, "w") as f:
-            json.dump(st.session_state.learning_cache, f)
-        
-        query_successful = True
-        
-    except ValueError as e:
-        error_message = str(e)
-        answer = f"❌ **Data Not Found**: {error_message}\n\nPlease try:\n- Being more specific in your query\n- Checking if the regulation exists\n- Trying different keywords"
-        
-    except Exception as e:
-        error_message = str(e)
-        answer = f"❌ **System Error**: {error_message}\n\nPlease try again later or contact support if the problem persists."
-    
-    # Clear the processing message
-    response_placeholder.empty()
+            
+            if not regulation_data:
+                raise ValueError(ERROR_MESSAGES["no_data_found"])
+            
+            # Extract relevant regulations
+            st.info("📄 Extracting relevant regulatory content...")
+            
+            relevant_regulations = extract_relevant_regulations(user_query, regulation_data)
+            
+            # Process with Llama Scout using Cerebras API
+            st.info("🤖 Generating precise regulatory answer...")
+            
+            answer, referenced_sources = process_with_llama_scout(
+                user_query,
+                relevant_regulations,
+                CEREBRAS_API_KEY
+            )
+            
+            # Filter source URLs and titles to only referenced ones
+            filtered_source_urls = []
+            filtered_source_titles = []
+            for source_idx in referenced_sources:
+                if source_idx < len(source_urls):
+                    filtered_source_urls.append(source_urls[source_idx])
+                    filtered_source_titles.append(source_titles[source_idx])
+            
+            # Update learning cache
+            for source_idx in referenced_sources:
+                if source_idx < len(source_urls):
+                    website_domain = source_urls[source_idx].split('/')[2]
+                    if website_domain in st.session_state.learning_cache["website_success_rates"]:
+                        st.session_state.learning_cache["website_success_rates"][website_domain] += 1
+                    else:
+                        st.session_state.learning_cache["website_success_rates"][website_domain] = 1
+            
+            # Save learning cache
+            with open(LEARNING_CACHE_PATH, "w") as f:
+                json.dump(st.session_state.learning_cache, f)
+            
+            query_successful = True
+            
+        except ValueError as e:
+            error_message = str(e)
+            answer = f"❌ **Data Not Found**: {error_message}\n\nPlease try:\n- Being more specific in your query\n- Checking if the regulation exists\n- Trying different keywords"
+            
+        except Exception as e:
+            error_message = str(e)
+            answer = f"❌ **System Error**: {error_message}\n\nPlease try again later or contact support if the problem persists."
     
     # Add assistant response to chat history
     message_data = {
         "role": "error" if not query_successful else "assistant", 
         "content": answer,
-        "source_html": source_html if query_successful else ""
+        "source_urls": filtered_source_urls if query_successful else [],
+        "source_titles": filtered_source_titles if query_successful else []
     }
     st.session_state.chat_history.append(message_data)
     
     # Display the response
-    display_message(message_data, "error" if not query_successful else "assistant")
+    display_chat_message(message_data, "error" if not query_successful else "assistant")
     
     # Extract regulation topic from the answer
     regulation_topic = "Error" if not query_successful else "General"
@@ -391,22 +401,32 @@ if st.button("Get Answer") and user_query:
         user_query,
         answer,
         regulation_topic,
-        len(source_urls) if 'source_urls' in locals() else 0,
+        len(filtered_source_urls) if query_successful else 0,
         response_time,
         "Los Angeles, CA, US",  # User location
         query_successful
     )
 
-# Clear chat button
-if st.button("Clear Chat History"):
-    st.session_state.chat_history = []
-    st.rerun()
+# Control buttons
+col1, col2 = st.columns(2)
+with col1:
+    if st.button("Clear Chat History"):
+        st.session_state.chat_history = []
+        st.rerun()
+
+with col2:
+    if st.button("📊 View Query Analytics"):
+        if st.session_state.chat_history:
+            st.info(f"Total queries this session: {len([m for m in st.session_state.chat_history if m['role'] == 'user'])}")
+        else:
+            st.info("No queries in this session yet.")
 
 # Footer
 st.markdown("""
-<div style='margin-top: 3rem; text-align: center; color: #6B7280;'>
+---
+<div style='text-align: center; color: #6B7280; padding: 2rem 0;'>
     <p><strong>⚖️ Legal Notice:</strong> This advisor references official automotive regulation sources but is for informational purposes only. 
     For legal compliance, always consult qualified professionals and verify with official regulatory authorities.</p>
-    <p><small>Data sources: Official regulatory websites + Interregs.net database</small></p>
+    <p><small>Data sources: Official regulatory websites + Interregs.net database | Powered by Cerebras AI + Firecrawl</small></p>
 </div>
 """, unsafe_allow_html=True)
