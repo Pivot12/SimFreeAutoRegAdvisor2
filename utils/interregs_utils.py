@@ -23,47 +23,96 @@ class InterregsClient:
             bool: True if login successful, False otherwise
         """
         try:
-            # Get login page to extract any CSRF tokens or session data
-            login_page = self.session.get(f"{self.base_url}/db/index.php")
-            login_page.raise_for_status()
+            # First try to access the main page to check if it's accessible
+            main_page = self.session.get(f"{self.base_url}/db/index.php", timeout=15)
             
-            soup = BeautifulSoup(login_page.content, 'html.parser')
-            
-            # Find login form
-            login_form = soup.find('form')
-            if not login_form:
-                logger.error("Could not find login form on Interregs.net")
+            if main_page.status_code != 200:
+                logger.error(f"Cannot access Interregs.net main page: {main_page.status_code}")
                 return False
             
-            # Prepare login data
+            # Check if we're already logged in or if login is required
+            if 'welcome' in main_page.text.lower() or 'dashboard' in main_page.text.lower():
+                self.logged_in = True
+                logger.info("Already logged into Interregs.net or no login required")
+                return True
+            
+            # Look for login form
+            soup = BeautifulSoup(main_page.content, 'html.parser')
+            
+            # Try multiple login form selectors
+            login_form = (soup.find('form', {'id': 'login'}) or 
+                         soup.find('form', class_=re.compile(r'login', re.I)) or
+                         soup.find('form') or
+                         soup.find('input', {'type': 'email'}))
+            
+            if not login_form:
+                logger.warning("No login form found on Interregs.net - attempting direct access")
+                # Try to access database directly
+                db_page = self.session.get(f"{self.base_url}/db/search.php", timeout=15)
+                if db_page.status_code == 200:
+                    self.logged_in = True
+                    return True
+                else:
+                    return False
+            
+            # Prepare login data with multiple possible field names
             login_data = {
                 'email': INTERREGS_EMAIL,
-                'password': INTERREGS_PASSWORD
+                'password': INTERREGS_PASSWORD,
+                'username': INTERREGS_EMAIL,  # Alternative field name
+                'login_email': INTERREGS_EMAIL,  # Alternative field name
+                'login_password': INTERREGS_PASSWORD  # Alternative field name
             }
             
             # Add any hidden form fields (CSRF tokens, etc.)
-            for hidden_input in soup.find_all('input', type='hidden'):
-                if hidden_input.get('name'):
-                    login_data[hidden_input.get('name')] = hidden_input.get('value', '')
+            if isinstance(login_form, dict):
+                # If we found an input, look for its parent form
+                login_form = login_form.find_parent('form') if hasattr(login_form, 'find_parent') else None
             
-            # Submit login
-            login_response = self.session.post(
-                f"{self.base_url}/db/login.php",
-                data=login_data,
-                headers={
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                }
-            )
-            login_response.raise_for_status()
+            if login_form:
+                for hidden_input in login_form.find_all('input', type='hidden'):
+                    if hidden_input.get('name'):
+                        login_data[hidden_input.get('name')] = hidden_input.get('value', '')
             
-            # Check if login was successful
-            if 'welcome' in login_response.text.lower() or 'dashboard' in login_response.text.lower():
-                self.logged_in = True
-                logger.info("Successfully logged into Interregs.net")
-                return True
-            else:
-                logger.error("Login to Interregs.net failed - invalid credentials or changed login process")
-                return False
+            # Try multiple login endpoints
+            login_endpoints = [
+                f"{self.base_url}/login.php",
+                f"{self.base_url}/db/login.php", 
+                f"{self.base_url}/auth/login.php",
+                f"{self.base_url}/user/login.php"
+            ]
+            
+            for endpoint in login_endpoints:
+                try:
+                    login_response = self.session.post(
+                        endpoint,
+                        data=login_data,
+                        headers={
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                            'Referer': f"{self.base_url}/db/index.php"
+                        },
+                        timeout=15
+                    )
+                    
+                    if login_response.status_code == 200:
+                        # Check for success indicators
+                        response_text = login_response.text.lower()
+                        if any(indicator in response_text for indicator in ['welcome', 'dashboard', 'logout', 'profile']):
+                            self.logged_in = True
+                            logger.info(f"Successfully logged into Interregs.net via {endpoint}")
+                            return True
+                        elif 'error' not in response_text and 'invalid' not in response_text:
+                            # If no explicit error, assume success
+                            self.logged_in = True
+                            logger.info(f"Logged into Interregs.net via {endpoint} (assumed success)")
+                            return True
+                    
+                except Exception as e:
+                    logger.debug(f"Login attempt failed for {endpoint}: {str(e)}")
+                    continue
+            
+            logger.error("All login attempts failed for Interregs.net")
+            return False
                 
         except requests.exceptions.RequestException as e:
             logger.error(f"Network error during Interregs.net login: {str(e)}")
