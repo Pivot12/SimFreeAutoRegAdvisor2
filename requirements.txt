@@ -6,6 +6,4 @@ requests>=2.31.0
 python-dotenv>=1.0.0
 lxml>=4.9.0
 beautifulsoup4>=4.12.0
-# Removed uuid as it's a built-in Python module and doesn't need installation
-# Uncomment the following line when ready to use the Cerebras SDK
-# cerebras-cloud-sdk>=1.0.0
+cerebras-cloud-sdk>=1.0.0
