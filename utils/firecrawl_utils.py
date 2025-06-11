@@ -540,11 +540,10 @@ def scrape_website(url: str, api_key: str) -> Dict[str, Any]:
         "Authorization": f"Bearer {api_key}"
     }
     
-    # Simplified data payload - removed extractorOptions that was causing 400 error
     data = {
         "url": url,
         "formats": ["markdown"],
-        "timeout": 30000  # Timeout in milliseconds (30 seconds)
+        "timeout": 30000
     }
     
     try:
@@ -552,7 +551,7 @@ def scrape_website(url: str, api_key: str) -> Dict[str, Any]:
             f"{FIRECRAWL_BASE_URL}/scrape",
             headers=headers,
             json=data,
-            timeout=30  # Request timeout
+            timeout=30
         )
         
         if response.status_code != 200:
@@ -561,7 +560,6 @@ def scrape_website(url: str, api_key: str) -> Dict[str, Any]:
         
         result = response.json()
         
-        # Check if the response contains data
         if "data" in result:
             return result["data"]
         else:
@@ -573,27 +571,7 @@ def scrape_website(url: str, api_key: str) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Error in scrape_website for {url}: {str(e)}")
         raise
-, '', text, flags=re.IGNORECASE | re.MULTILINE)
-    
-    # Remove URLs but keep regulation document links (fixed regex - no variable width lookbehind)
-    # First preserve regulation document URLs
-    regulation_urls = re.findall(r'https?://[^\s]*(?:\.pdf|regulation|directive)', text, re.IGNORECASE)
-    # Remove other URLs
-    text = re.sub(r'https?://[^\s]+', '', text)
-    # Add back regulation URLs
-    for url in regulation_urls:
-        text += f"\n{url}"
-    
-    # Clean up markdown artifacts
-    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)  # Remove markdown links but keep text
-    text = re.sub(r'[*_]{1,2}([^*_]+)[*_]{1,2}', r'\1', text)  # Remove markdown emphasis
-    
-    # Remove excessive punctuation
-    text = re.sub(r'[.]{3,}', '...', text)
-    text = re.sub(r'[-]{3,}', '---', text)
-    
-    return text.strip()
-
+        
 def extract_region_from_query(query: str) -> str:
     """Extract region information from query for Interregs search."""
     query_lower = query.lower()
