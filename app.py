@@ -16,6 +16,7 @@ from config import (
     REGULATORY_WEBSITES,
     LOG_FILE_PATH,
     LEARNING_CACHE_PATH,
+    ERROR_MESSAGES
 )
 
 # Set page configuration
@@ -25,6 +26,25 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# Check API keys on startup
+def check_api_keys():
+    """Check if required API keys are configured."""
+    missing_keys = []
+    
+    if not FIRECRAWL_API_KEY or FIRECRAWL_API_KEY == "fc-your-firecrawl-api-key-here":
+        missing_keys.append("Firecrawl API Key")
+    
+    if not CEREBRAS_API_KEY or CEREBRAS_API_KEY == "csk-your-cerebras-api-key-here":
+        missing_keys.append("Cerebras API Key")
+    
+    if missing_keys:
+        st.error(f"Missing required API keys: {', '.join(missing_keys)}")
+        st.error("Please configure your API keys in .streamlit/secrets.toml")
+        st.stop()
+
+# Check API keys before proceeding
+check_api_keys()
 
 # Initialize session state variables if they don't exist
 if "chat_history" not in st.session_state:
@@ -74,6 +94,10 @@ st.markdown("""
         background-color: #F3F4F6;
         border-left: 5px solid #10B981;
     }
+    .error-message {
+        background-color: #FEE2E2;
+        border-left: 5px solid #DC2626;
+    }
     .message-content {
         display: flex;
         flex-direction: row;
@@ -99,6 +123,10 @@ st.markdown("""
         background-color: #10B981;
         color: white;
     }
+    .error-avatar {
+        background-color: #DC2626;
+        color: white;
+    }
     .source-link {
         font-size: 0.8rem;
         color: #6B7280;
@@ -121,6 +149,13 @@ st.markdown("""
         border-radius: 0.5rem;
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
     }
+    .warning-box {
+        background-color: #FEF3C7;
+        border: 1px solid #F59E0B;
+        border-radius: 0.5rem;
+        padding: 1rem;
+        margin: 1rem 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -128,10 +163,22 @@ st.markdown("""
 st.markdown("<h1 class='main-header'>Automotive Regulations Advisor</h1>", unsafe_allow_html=True)
 st.markdown("<p class='sub-header'>Ask questions about automotive regulations worldwide and get accurate answers from official sources</p>", unsafe_allow_html=True)
 
-# Sidebar with stats
+# Sidebar with stats and information
 with st.sidebar:
     st.header("About")
-    st.write("This tool provides accurate information about automotive regulations by searching and retrieving data from official regulatory websites.")
+    st.write("This tool provides accurate information about automotive regulations by searching and retrieving data from official regulatory websites and the Interregs.net database.")
+    
+    # Data sources information
+    st.header("Data Sources")
+    st.markdown("""
+    **Primary Sources:**
+    - US NHTSA & EPA
+    - EU Commission & UNECE
+    - Regional regulatory bodies
+    
+    **Backup Source:**
+    - Interregs.net database
+    """)
     
     # Display stats
     st.header("Statistics")
@@ -140,90 +187,129 @@ with st.sidebar:
     if not log_data.empty:
         # Calculate and display stats
         total_queries = len(log_data)
+        successful_queries = log_data['query_successful'].sum() if 'query_successful' in log_data.columns else total_queries
         avg_response_time = log_data['response_time'].mean()
-        top_regulations = log_data['regulation_topic'].value_counts().head(5)
         
         col1, col2 = st.columns(2)
         with col1:
             st.markdown(f"<div class='stat-box'><h3>Total Queries</h3><p>{total_queries}</p></div>", unsafe_allow_html=True)
         with col2:
-            st.markdown(f"<div class='stat-box'><h3>Avg Response Time</h3><p>{avg_response_time:.2f}s</p></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='stat-box'><h3>Success Rate</h3><p>{successful_queries/total_queries*100:.1f}%</p></div>", unsafe_allow_html=True)
         
-        st.markdown("<div class='stat-box'><h3>Top Regulation Topics</h3></div>", unsafe_allow_html=True)
-        st.bar_chart(top_regulations)
+        st.markdown(f"<div class='stat-box'><h3>Avg Response Time</h3><p>{avg_response_time:.2f}s</p></div>", unsafe_allow_html=True)
+        
+        if 'regulation_topic' in log_data.columns:
+            top_regulations = log_data['regulation_topic'].value_counts().head(5)
+            if not top_regulations.empty:
+                st.markdown("<div class='stat-box'><h3>Top Regulation Topics</h3></div>", unsafe_allow_html=True)
+                st.bar_chart(top_regulations)
     else:
         st.info("No query data available yet.")
+    
+    # Important notice
+    st.header("Important Notice")
+    st.markdown("""
+    <div class='warning-box'>
+    <strong>⚠️ Legal Disclaimer</strong><br>
+    This tool provides information for reference only. 
+    Always verify with official regulatory authorities 
+    and consult qualified experts for legal compliance.
+    </div>
+    """, unsafe_allow_html=True)
 
 # Main interface
-col1, col2 = st.columns([3, 1])
+def display_message(message, message_type="assistant"):
+    """Display a chat message with appropriate styling."""
+    if message_type == "user":
+        css_class = "user-message"
+        avatar_class = "user-avatar"
+        avatar_icon = "👤"
+    elif message_type == "error":
+        css_class = "error-message"
+        avatar_class = "error-avatar"
+        avatar_icon = "⚠️"
+    else:
+        css_class = "assistant-message"
+        avatar_class = "assistant-avatar"
+        avatar_icon = "🚗"
+    
+    source_html = message.get("source_html", "") if isinstance(message, dict) else ""
+    content = message.get("content", message) if isinstance(message, dict) else message
+    
+    st.markdown(f"""
+    <div class='chat-message {css_class}'>
+        <div class='message-content'>
+            <div class='avatar {avatar_class}'>{avatar_icon}</div>
+            <div class='message-text'>{content}</div>
+        </div>
+        <div class='source-link'>
+            {source_html}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 # Display chat history
 for message in st.session_state.chat_history:
-    if message["role"] == "user":
-        st.markdown(f"""
-        <div class='chat-message user-message'>
-            <div class='message-content'>
-                <div class='avatar user-avatar'>👤</div>
-                <div class='message-text'>{message["content"]}</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.markdown(f"""
-        <div class='chat-message assistant-message'>
-            <div class='message-content'>
-                <div class='avatar assistant-avatar'>🚗</div>
-                <div class='message-text'>{message["content"]}</div>
-            </div>
-            <div class='source-link'>
-                {message.get("source_html", "")}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+    display_message(message, message["role"])
 
 # User input
-user_query = st.text_input("Ask about automotive regulations:", placeholder="e.g., What are the latest emissions standards for passenger vehicles in the EU?")
+user_query = st.text_input(
+    "Ask about automotive regulations:", 
+    placeholder="e.g., What are the latest emissions standards for passenger vehicles in the EU?",
+    key="user_input"
+)
 
 # Process button click
 if st.button("Get Answer") and user_query:
     # Add user query to chat history
     st.session_state.chat_history.append({"role": "user", "content": user_query})
+    display_message({"role": "user", "content": user_query}, "user")
     
     # Create a placeholder for the assistant's response
     response_placeholder = st.empty()
-    response_placeholder.markdown("""
-    <div class='chat-message assistant-message'>
-        <div class='message-content'>
-            <div class='avatar assistant-avatar'>🚗</div>
-            <div class='message-text'>Searching regulatory databases...</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    with response_placeholder:
+        st.info("🔍 Searching regulatory databases...")
     
     # Process the query
     start_time = time.time()
+    query_successful = False
+    error_message = None
+    answer = ""
+    source_html = ""
     
     try:
         # Use learning cache to prioritize websites based on past success
-        prioritized_websites = REGULATORY_WEBSITES
+        prioritized_websites = list(REGULATORY_WEBSITES.values())
         if st.session_state.learning_cache["website_success_rates"]:
             prioritized_websites = sorted(
-                REGULATORY_WEBSITES,
-                key=lambda x: st.session_state.learning_cache["website_success_rates"].get(x, 0),
+                REGULATORY_WEBSITES.values(),
+                key=lambda x: st.session_state.learning_cache["website_success_rates"].get(x.split('/')[2], 0),
                 reverse=True
             )
         
-        # Search for regulation data using Firecrawl API
+        # Search for regulation data using Firecrawl API and LLM website selection
+        with response_placeholder:
+            st.info("🌐 Searching selected regulatory websites...")
+        
         regulation_data, source_urls, source_titles = fetch_regulation_data(
             user_query, 
             prioritized_websites,
             FIRECRAWL_API_KEY
         )
         
+        if not regulation_data:
+            raise ValueError(ERROR_MESSAGES["no_data_found"])
+        
         # Extract relevant regulations
+        with response_placeholder:
+            st.info("📄 Analyzing regulatory content...")
+        
         relevant_regulations = extract_relevant_regulations(user_query, regulation_data)
         
         # Process with Llama Scout using Cerebras API
+        with response_placeholder:
+            st.info("🤖 Processing with AI regulatory expert...")
+        
         answer, referenced_sources = process_with_llama_scout(
             user_query,
             relevant_regulations,
@@ -252,31 +338,36 @@ if st.button("Get Answer") and user_query:
         with open(LEARNING_CACHE_PATH, "w") as f:
             json.dump(st.session_state.learning_cache, f)
         
-        # Add assistant response to chat history
-        st.session_state.chat_history.append({
-            "role": "assistant", 
-            "content": answer,
-            "source_html": source_html
-        })
+        query_successful = True
         
-        # Display the assistant's response
-        response_placeholder.markdown(f"""
-        <div class='chat-message assistant-message'>
-            <div class='message-content'>
-                <div class='avatar assistant-avatar'>🚗</div>
-                <div class='message-text'>{answer}</div>
-            </div>
-            <div class='source-link'>
-                {source_html}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+    except ValueError as e:
+        error_message = str(e)
+        answer = f"❌ **Data Not Found**: {error_message}\n\nPlease try:\n- Being more specific in your query\n- Checking if the regulation exists\n- Trying different keywords"
         
-        # Extract regulation topic from the answer
-        regulation_topic = "General"
+    except Exception as e:
+        error_message = str(e)
+        answer = f"❌ **System Error**: {error_message}\n\nPlease try again later or contact support if the problem persists."
+    
+    # Clear the processing message
+    response_placeholder.empty()
+    
+    # Add assistant response to chat history
+    message_data = {
+        "role": "error" if not query_successful else "assistant", 
+        "content": answer,
+        "source_html": source_html if query_successful else ""
+    }
+    st.session_state.chat_history.append(message_data)
+    
+    # Display the response
+    display_message(message_data, "error" if not query_successful else "assistant")
+    
+    # Extract regulation topic from the answer
+    regulation_topic = "Error" if not query_successful else "General"
+    if query_successful:
         topic_keywords = {
             "emissions": "Emissions Standards",
-            "safety": "Safety Requirements",
+            "safety": "Safety Requirements", 
             "fuel": "Fuel Efficiency",
             "electric": "Electric Vehicles",
             "autonomous": "Autonomous Driving",
@@ -291,46 +382,31 @@ if st.button("Get Answer") and user_query:
             if keyword.lower() in user_query.lower() or keyword.lower() in answer.lower():
                 regulation_topic = topic
                 break
-        
-        # Log the query
-        response_time = time.time() - start_time
-        log_query(
-            LOG_FILE_PATH,
-            st.session_state.session_id,
-            user_query,
-            answer,
-            regulation_topic,
-            len(source_urls),
-            response_time
-        )
-        
-    except Exception as e:
-        error_message = f"An error occurred: {str(e)}"
-        st.session_state.chat_history.append({"role": "assistant", "content": error_message})
-        response_placeholder.markdown(f"""
-        <div class='chat-message assistant-message'>
-            <div class='message-content'>
-                <div class='avatar assistant-avatar'>🚗</div>
-                <div class='message-text'>{error_message}</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Log the error
-        response_time = time.time() - start_time
-        log_query(
-            LOG_FILE_PATH,
-            st.session_state.session_id,
-            user_query,
-            error_message,
-            "Error",
-            0,
-            response_time
-        )
+    
+    # Log the query
+    response_time = time.time() - start_time
+    log_query(
+        LOG_FILE_PATH,
+        st.session_state.session_id,
+        user_query,
+        answer,
+        regulation_topic,
+        len(source_urls) if 'source_urls' in locals() else 0,
+        response_time,
+        "Los Angeles, CA, US",  # User location
+        query_successful
+    )
+
+# Clear chat button
+if st.button("Clear Chat History"):
+    st.session_state.chat_history = []
+    st.rerun()
 
 # Footer
 st.markdown("""
 <div style='margin-top: 3rem; text-align: center; color: #6B7280;'>
-    <p>This advisor only references official automotive regulation sources. For legal advice, please consult a qualified professional.</p>
+    <p><strong>⚖️ Legal Notice:</strong> This advisor references official automotive regulation sources but is for informational purposes only. 
+    For legal compliance, always consult qualified professionals and verify with official regulatory authorities.</p>
+    <p><small>Data sources: Official regulatory websites + Interregs.net database</small></p>
 </div>
 """, unsafe_allow_html=True)
