@@ -154,7 +154,43 @@ def mock_cerebras_api(prompt: str, num_sources: int) -> Tuple[str, List[int]]:
     time.sleep(2)
     
     # Create a mock response based on the query
-    if "emissions" in query.lower():
+    if "fuel" in query.lower() or "gasoline" in query.lower() or "diesel" in query.lower():
+        answer = """# Legal Fuel Types for US Passenger Cars
+
+Based on the regulatory sources, here are the legal fuel types for passenger cars in the United States:
+
+## Primary Fuel Types
+
+**Gasoline (Petrol)**
+According to [Source 0], regular unleaded gasoline with a minimum octane rating of 87 is the most common fuel type for passenger vehicles. The EPA requires that most gasoline sold in the US contains a minimum of 10% ethanol (E10 blend).
+
+**Diesel Fuel**
+[Source 1] indicates that Ultra Low Sulfur Diesel (ULSD) with a maximum sulfur content of 15 parts per million (ppm) is required for all highway diesel vehicles. This has been mandatory since 2007 under EPA regulations.
+
+## Alternative Fuels
+
+**Ethanol Blends**
+As stated in [Source 0], E15 (15% ethanol blend) is approved by the EPA for use in model year 2001 and newer vehicles. E85 (85% ethanol) is approved specifically for flexible fuel vehicles (FFVs).
+
+**Natural Gas and Propane**
+[Source 2] confirms that compressed natural gas (CNG) and liquefied petroleum gas (LPG/propane) are EPA-approved alternative fuels for passenger vehicles, provided they meet appropriate ASTM standards.
+
+**Electric Power**
+Electric vehicles using battery power or hydrogen fuel cells are recognized as zero-emission vehicles under federal regulations, as noted in [Source 1].
+
+## Regulatory Requirements
+
+All motor fuels sold in the United States must be:
+- Registered with the EPA
+- Compliant with Clean Air Act requirements
+- Subject to the Renewable Fuel Standard (RFS) program
+
+Regional variations may apply, particularly in California where CARB (California Air Resources Board) has additional fuel specifications.
+
+Sources referenced: [Source 0], [Source 1], [Source 2]"""
+        source_indices = [0, 1, 2]
+    
+    elif "emissions" in query.lower():
         answer = """# Emissions Regulations Overview
 
 Based on the provided regulatory sources, the latest emissions standards for vehicles vary by region:
@@ -226,30 +262,33 @@ Sources referenced: [Source 0], [Source 1], [Source 3], [Source 4]"""
         source_indices = [0, 1, 3, 4]
     
     else:
-        answer = """# Automotive Regulatory Information
+        # More specific response for unmatched queries
+        answer = f"""# Automotive Regulatory Information
 
-Based on the available sources, I can provide the following information related to your query:
+Based on the available regulatory sources, I need to provide information about: "{query}"
+
+## Available Information
+[Source 0] indicates that automotive regulations in the United States are primarily governed by federal agencies including the EPA (Environmental Protection Agency) for emissions and fuel standards, and NHTSA (National Highway Traffic Safety Administration) for safety requirements.
 
 ## Regulatory Framework
-[Source 0] indicates that automotive regulations vary significantly across different regions, with major regulatory bodies including the European Union (via type approval system), the United States (through self-certification), and the United Nations Economic Commission for Europe (UNECE), which provides global harmonized regulations.
+According to [Source 1], the regulatory framework varies by topic area:
+- **Emissions and Fuel Standards**: Governed by EPA under the Clean Air Act
+- **Safety Standards**: Managed by NHTSA under Federal Motor Vehicle Safety Standards (FMVSS)
+- **Energy Efficiency**: Overseen by both EPA and NHTSA through CAFE standards
 
 ## Compliance Requirements
-According to [Source 2], manufacturers must demonstrate compliance with applicable regulations before vehicles can be sold in specific markets. This typically includes testing and certification of:
-- Emissions performance
-- Safety systems
-- Electromagnetic compatibility
-- Noise levels
+[Source 2] states that manufacturers must demonstrate compliance through:
+- Testing and certification procedures
+- Documentation submission to relevant authorities
+- Ongoing production compliance monitoring
 
-## Documentation
-[Source 1] states that proper documentation is essential for regulatory compliance, including technical information files, test reports, and certificates issued by recognized authorities.
+**Note**: For specific details about your particular question, I would need access to more targeted regulatory sources that directly address this topic. The provided sources contain general automotive regulatory information but may not cover all specific aspects of your inquiry.
 
-For more specific information about your particular question, additional regulatory sources would be needed as the provided sources don't cover all aspects of automotive regulations in detail.
+For the most current and specific information, please consult the official websites of relevant regulatory agencies or contact qualified regulatory experts.
 
 Sources referenced: [Source 0], [Source 1], [Source 2]"""
-        # Randomly select sources based on available number (for demonstration)
-        import random
-        num_refs = min(3, num_sources)
-        source_indices = random.sample(range(num_sources), num_refs) if num_sources > 0 else []
+        # Use available sources
+        source_indices = list(range(min(3, num_sources)))
     
     return answer, source_indices
 
