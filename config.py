@@ -16,8 +16,9 @@ def get_api_key(key_name, secret_name):
     
     return api_key
 
-FIRECRAWL_API_KEY = get_api_key("FIRECRAWL_API_KEY", "fc-5b9ec38c1f764b7c896696878063e18d")
-CEREBRAS_API_KEY = get_api_key("CEREBRAS_API_KEY", "csk-x35t5njhv4jrhwjy4f46x6dxj5yvm9yv8xv9dfdm9mjfkr4x")
+# Fixed API key loading - using correct secret names
+FIRECRAWL_API_KEY = get_api_key("FIRECRAWL_API_KEY", "firecrawl_api_key")
+CEREBRAS_API_KEY = get_api_key("CEREBRAS_API_KEY", "cerebras_api_key")
 
 # Check if API keys are available, using placeholders for development
 if not FIRECRAWL_API_KEY:
