@@ -2,9 +2,108 @@ import requests
 import logging
 import time
 from typing import List, Tuple, Dict, Any
-from config import FIRECRAWL_BASE_URL, MAX_SITES_PER_QUERY, MAX_RESULTS_PER_SITE, CRAWL_DEPTH, ERROR_MESSAGES
+from config import (
+    FIRECRAWL_BASE_URL, 
+    MAX_SITES_PER_QUERY, 
+    MAX_RESULTS_PER_SITE, 
+    CRAWL_DEPTH, 
+    ERROR_MESSAGES,
+    REGULATORY_WEBSITES,
+    WEBSITE_SELECTION_CRITERIA,
+    REGION_WEBSITES,
+    CEREBRAS_API_KEY
+)
+from utils.interregs_utils import search_interregs_regulations
 
 logger = logging.getLogger(__name__)
+
+def select_websites_with_llm(query: str, api_key: str) -> List[str]:
+    """
+    Use LLM to determine the most appropriate regulatory websites for the query.
+    
+    Args:
+        query: User query about automotive regulations
+        api_key: Cerebras API key
+    
+    Returns:
+        List of selected website URLs
+    """
+    try:
+        from cerebras.cloud.sdk import Cerebras
+        
+        client = Cerebras(api_key=api_key)
+        
+        # Create prompt for website selection
+        websites_info = "\n".join([f"- {key}: {url}" for key, url in REGULATORY_WEBSITES.items()])
+        
+        prompt = f"""You are an automotive regulatory expert. Given the user query, select the 3 most appropriate regulatory websites to search from this list:
+
+{websites_info}
+
+Query: "{query}"
+
+Consider:
+- Geographic regions mentioned (US, EU, Japan, etc.)
+- Regulation categories (emissions, safety, homologation, etc.)
+- Specific agencies or standards mentioned
+
+Respond with ONLY the website keys (e.g., US_NHTSA, EU_COMMISSION, UNECE) separated by commas, in order of relevance."""
+
+        response = client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model="llama-4-scout-17b-16e-instruct",
+            temperature=0.1,
+            max_tokens=100
+        )
+        
+        # Parse LLM response
+        selected_keys = [key.strip() for key in response.choices[0].message.content.split(',')]
+        selected_websites = [REGULATORY_WEBSITES[key] for key in selected_keys if key in REGULATORY_WEBSITES]
+        
+        if selected_websites:
+            logger.info(f"LLM selected websites: {selected_keys}")
+            return selected_websites[:MAX_SITES_PER_QUERY]
+        else:
+            logger.warning("LLM didn't select valid websites, falling back to heuristic selection")
+            return select_websites_heuristic(query)
+            
+    except Exception as e:
+        logger.error(f"Error using LLM for website selection: {str(e)}")
+        return select_websites_heuristic(query)
+
+def select_websites_heuristic(query: str) -> List[str]:
+    """
+    Fallback heuristic method for website selection when LLM fails.
+    
+    Args:
+        query: User query about automotive regulations
+    
+    Returns:
+        List of selected website URLs
+    """
+    query_lower = query.lower()
+    selected_websites = set()
+    
+    # Region-based selection
+    for region, websites in REGION_WEBSITES.items():
+        if region in query_lower:
+            for website_key in websites:
+                if website_key in REGULATORY_WEBSITES:
+                    selected_websites.add(REGULATORY_WEBSITES[website_key])
+    
+    # Category-based selection
+    for category, websites in WEBSITE_SELECTION_CRITERIA.items():
+        if category in query_lower or category.replace('_', ' ') in query_lower:
+            for website_key in websites:
+                if website_key in REGULATORY_WEBSITES:
+                    selected_websites.add(REGULATORY_WEBSITES[website_key])
+    
+    # If no specific matches, use global sources
+    if not selected_websites:
+        global_keys = ["UNECE", "EU_COMMISSION", "US_EPA"]
+        selected_websites = {REGULATORY_WEBSITES[key] for key in global_keys if key in REGULATORY_WEBSITES}
+    
+    return list(selected_websites)[:MAX_SITES_PER_QUERY]
 
 def fetch_regulation_data(
     query: str, 
@@ -13,10 +112,11 @@ def fetch_regulation_data(
 ) -> Tuple[List[str], List[str], List[str]]:
     """
     Fetch regulation data from multiple regulatory websites using Firecrawl API.
+    Falls back to Interregs.net if primary sources fail.
     
     Args:
         query: User query about automotive regulations
-        websites: List of regulatory websites to search
+        websites: List of regulatory websites to search (ignored - LLM will select)
         api_key: Firecrawl API key
     
     Returns:
@@ -30,14 +130,13 @@ def fetch_regulation_data(
     # Check if API key is configured
     if not api_key or api_key == "YOUR_FIRECRAWL_API_KEY":
         logger.error("Firecrawl API key not configured")
-        # Return mock data for demonstration
-        return create_mock_regulation_data(query)
+        raise ValueError(ERROR_MESSAGES["api_key_missing"])
+    
+    # Use LLM to select most appropriate websites
+    target_websites = select_websites_with_llm(query, CEREBRAS_API_KEY)
     
     # Prepare search terms based on query
     search_terms = prepare_search_terms(query)
-    
-    # Prepare websites for search (limit to MAX_SITES_PER_QUERY)
-    target_websites = websites[:MAX_SITES_PER_QUERY]
     
     all_regulation_data = []
     all_source_urls = []
@@ -67,217 +166,80 @@ def fetch_regulation_data(
                 all_source_titles.append(website_title)
                 logger.debug(f"Found relevant content from {website}")
             
-            # For cloud deployment, skip crawling to avoid timeouts
-            # if CRAWL_DEPTH > 0 and len(all_regulation_data) < 3:
-            #     crawl_data, urls, titles = crawl_website(website, search_terms, api_key, max_results=MAX_RESULTS_PER_SITE)
-            #     all_regulation_data.extend(crawl_data)
-            #     all_source_urls.extend(urls)
-            #     all_source_titles.extend(titles)
-            
         except Exception as e:
             logger.error(f"Error fetching data from {website}: {str(e)}")
             continue
     
-    # If we didn't find any data, provide mock data for demonstration
+    # If we didn't find sufficient data from primary sources, try Interregs.net as backup
+    if len(all_regulation_data) < 2:
+        logger.info("Insufficient data from primary sources, trying Interregs.net backup")
+        try:
+            # Extract region and category for Interregs search
+            region = extract_region_from_query(query)
+            category = extract_category_from_query(query)
+            
+            interregs_data, interregs_urls, interregs_titles = search_interregs_regulations(
+                query, region, category
+            )
+            
+            all_regulation_data.extend(interregs_data)
+            all_source_urls.extend(interregs_urls)
+            all_source_titles.extend(interregs_titles)
+            
+            logger.info(f"Added {len(interregs_data)} results from Interregs.net backup")
+            
+        except Exception as e:
+            logger.error(f"Error fetching data from Interregs.net backup: {str(e)}")
+    
+    # If still no data found, raise an error
     if not all_regulation_data:
-        logger.warning("No regulation data found from any website, providing mock data")
-        return create_mock_regulation_data(query)
+        logger.error("No regulation data found from any source")
+        raise ValueError(ERROR_MESSAGES["no_data_found"])
     
     logger.info(f"Successfully fetched regulation data from {len(all_source_urls)} sources")
     return all_regulation_data, all_source_urls, all_source_titles
 
-def create_mock_regulation_data(query: str) -> Tuple[List[str], List[str], List[str]]:
-    """
-    Create mock regulation data for demonstration purposes when API is not available.
-    
-    Args:
-        query: User query about automotive regulations
-    
-    Returns:
-        Tuple containing mock regulation data, URLs, and titles
-    """
-    logger.info("Creating mock regulation data for demonstration")
-    
-    # Analyze query to provide relevant mock data
+def extract_region_from_query(query: str) -> str:
+    """Extract region information from query for Interregs search."""
     query_lower = query.lower()
     
-    mock_data = []
-    mock_urls = []
-    mock_titles = []
-    
-    if "emissions" in query_lower or "fuel" in query_lower:
-        mock_data.append("""
-# US Fuel Regulations and Standards
-
-## Legal Fuel Types for Passenger Cars in the United States
-
-### Gasoline (Petrol)
-- **Regular Unleaded**: Minimum 87 octane rating (most common)
-- **Mid-Grade**: 89-90 octane rating  
-- **Premium**: 91+ octane rating
-- Must contain minimum 10% ethanol (E10) in most areas
-- Maximum 15% ethanol (E15) approved for 2001+ vehicles
-
-### Diesel Fuel
-- **Ultra Low Sulfur Diesel (ULSD)**: Maximum 15 ppm sulfur content
-- Required for all highway diesel vehicles since 2007
-- Must meet ASTM D975 specifications
-
-### Alternative Fuels (EPA Approved)
-- **E85 (Ethanol)**: 85% ethanol blend for flex-fuel vehicles
-- **Compressed Natural Gas (CNG)**: Must meet ASTM D6606 standards
-- **Liquefied Petroleum Gas (LPG/Propane)**: HD-5 grade propane
-- **Hydrogen**: For fuel cell vehicles, must meet SAE J2719 purity standards
-
-### Electric Power
-- Battery electric vehicles (BEVs) using grid electricity
-- Plug-in hybrid electric vehicles (PHEVs)
-
-## Key Regulatory Requirements
-- All fuels must be EPA registered and certified
-- Fuel distributors must meet Clean Air Act requirements
-- Regional fuel variations may apply (e.g., California CARB standards)
-- Renewable Fuel Standard (RFS) mandates minimum biofuel content
-
-## State-Specific Considerations
-- California has additional Air Resources Board (CARB) fuel standards
-- Some states have specific biodiesel blending requirements
-- Winter/summer fuel blends vary by region
-        """)
-        mock_urls.append("https://www.epa.gov/regulations-emissions-vehicles-and-engines")
-        mock_titles.append("EPA Vehicle Emissions Standards and Fuel Regulations")
-        mock_data.append("""
-# Emissions Standards Overview
-
-## European Union
-The European Union has implemented the Euro 6 emissions standards for passenger vehicles, which came into effect in September 2014. These standards set strict limits on nitrogen oxides (NOx), particulate matter (PM), carbon monoxide (CO), and hydrocarbons (HC).
-
-Key requirements:
-- NOx limit: 80 mg/km for diesel vehicles
-- PM limit: 5 mg/km for diesel vehicles
-- Real-world driving emissions (RDE) testing introduced
-
-## United States
-The U.S. Environmental Protection Agency (EPA) has established Tier 3 emissions standards, which are being phased in from 2017 through 2025. These standards reduce both tailpipe and evaporative emissions.
-
-## China
-China has implemented China 6 emissions standards, which are among the most stringent globally and comparable to Euro 6 standards.
-        """)
-        mock_urls.append("https://www.epa.gov/regulations-emissions-vehicles-and-engines")
-        mock_titles.append("EPA Vehicle Emissions Standards")
-        
-        mock_data.append("""
-# Global Emissions Regulations Comparison
-
-The automotive industry faces increasingly stringent emissions regulations worldwide. Major markets have implemented comprehensive standards:
-
-- **Euro 7**: Expected implementation by 2025 with further reduced limits
-- **California CARB**: Advanced Clean Cars II program
-- **Japan**: Post New Long-term regulations
-- **India**: BS VI standards equivalent to Euro 6
-
-These regulations drive technological innovation in catalytic converters, particulate filters, and hybrid/electric powertrains.
-        """)
-        mock_urls.append("https://unece.org/transport/vehicle-regulations")
-        mock_titles.append("UNECE Vehicle Regulations")
-        
-    elif "safety" in query_lower:
-        mock_data.append("""
-# Vehicle Safety Requirements
-
-## Global Safety Standards
-The United Nations Economic Commission for Europe (UNECE) has established various safety regulations under the 1958 Agreement covering:
-
-- Braking systems (Regulation No. 13)
-- Lighting and light-signalling devices (Regulations No. 48, 7, 87, etc.)
-- Passive safety (crash performance) (Regulations No. 94, 95, 16, etc.)
-- Active safety systems (Regulations No. 131, 152, etc.)
-
-## Advanced Safety Features
-Modern vehicles must be equipped with:
-- Emergency braking systems
-- Lane-keeping assistance
-- Driver drowsiness detection
-- Blind spot monitoring
-        """)
-        mock_urls.append("https://www.nhtsa.gov/laws-regulations")
-        mock_titles.append("NHTSA Safety Standards")
-        
-    elif "homologation" in query_lower or "type approval" in query_lower:
-        mock_data.append("""
-# Vehicle Homologation Process
-
-## What is Homologation?
-Homologation is the process of certifying that a vehicle meets the regulatory requirements of a specific market. It involves comprehensive testing and documentation.
-
-## EU Type Approval Process
-In the European Union, vehicle type approval is governed by Regulation (EU) 2018/858:
-
-1. **Whole Vehicle Type Approval (WVTA)**: Covers the complete vehicle
-2. **Step-by-step approval**: Individual systems approved separately
-3. **Mixed procedure**: Combination of both approaches
-
-## Key Documentation
-- Certificate of Conformity (CoC)
-- Technical documentation package
-- Test reports from accredited laboratories
-- Declaration of conformity
-
-## Global Recognition
-Under the UNECE 1958 Agreement, type approvals can be mutually recognized between contracting parties.
-        """)
-        mock_urls.append("https://ec.europa.eu/growth/sectors/automotive-industry_en")
-        mock_titles.append("EU Type Approval System")
-        
+    if any(term in query_lower for term in ['us', 'usa', 'united states', 'america']):
+        return 'US'
+    elif any(term in query_lower for term in ['eu', 'europe', 'european']):
+        return 'EU'
+    elif 'japan' in query_lower:
+        return 'Japan'
+    elif 'china' in query_lower:
+        return 'China'
+    elif any(term in query_lower for term in ['uk', 'britain', 'british']):
+        return 'UK'
+    elif 'india' in query_lower:
+        return 'India'
+    elif 'australia' in query_lower:
+        return 'Australia'
     else:
-        # General automotive regulations information
-        mock_data.append("""
-# Automotive Regulatory Framework
+        return 'Global'
 
-The automotive industry is subject to extensive regulations covering:
-
-## Safety Regulations
-- Crash safety standards
-- Electronic stability control
-- Advanced driver assistance systems (ADAS)
-- Lighting and visibility requirements
-
-## Environmental Standards
-- Emissions limits for pollutants
-- Fuel economy standards
-- End-of-life vehicle recycling
-- Noise regulations
-
-## Market Access Requirements
-- Type approval and homologation
-- Conformity of production
-- Market surveillance
-- Recall procedures
-        """)
-        mock_urls.append("https://www.acea.auto/publication/automotive-regulatory-guide-2023/")
-        mock_titles.append("ACEA Automotive Regulatory Guide")
-        
-        mock_data.append("""
-# Regional Regulatory Differences
-
-## Harmonization Efforts
-While global harmonization through UNECE regulations has made progress, significant regional differences remain:
-
-- **Testing procedures**: Different test cycles and conditions
-- **Implementation timelines**: Varying phase-in schedules
-- **Enforcement mechanisms**: Different approaches to compliance
-- **Market-specific requirements**: Unique regional needs
-
-## Future Trends
-- Increased focus on cybersecurity
-- Autonomous vehicle regulations
-- Electric vehicle infrastructure
-- Connected vehicle standards
-        """)
-        mock_urls.append("https://unece.org/transport/vehicle-regulations")
-        mock_titles.append("UNECE Global Vehicle Regulations")
+def extract_category_from_query(query: str) -> str:
+    """Extract category information from query for Interregs search."""
+    query_lower = query.lower()
     
-    return mock_data, mock_urls, mock_titles
+    if any(term in query_lower for term in ['emission', 'exhaust', 'co2', 'pollution']):
+        return 'Emissions'
+    elif any(term in query_lower for term in ['safety', 'crash', 'protection']):
+        return 'Safety'
+    elif any(term in query_lower for term in ['homologation', 'type approval', 'certification']):
+        return 'Homologation'
+    elif any(term in query_lower for term in ['electric', 'ev', 'battery']):
+        return 'Electric Vehicles'
+    elif any(term in query_lower for term in ['fuel', 'gasoline', 'diesel']):
+        return 'Fuel'
+    elif any(term in query_lower for term in ['noise', 'sound']):
+        return 'Noise'
+    elif any(term in query_lower for term in ['light', 'lamp', 'illumination']):
+        return 'Lighting'
+    else:
+        return 'General'
 
 def prepare_search_terms(query: str) -> List[str]:
     """
@@ -343,7 +305,7 @@ def scrape_website(url: str, api_key: str) -> Dict[str, Any]:
         
         if response.status_code != 200:
             logger.error(f"Error scraping {url}: {response.status_code} - {response.text}")
-            return {}
+            raise Exception(f"Firecrawl API error: {response.status_code}")
         
         result = response.json()
         
@@ -355,36 +317,10 @@ def scrape_website(url: str, api_key: str) -> Dict[str, Any]:
     
     except requests.exceptions.Timeout:
         logger.error(f"Timeout scraping {url}")
-        return {}
+        raise Exception(f"Timeout scraping {url}")
     except Exception as e:
         logger.error(f"Error in scrape_website for {url}: {str(e)}")
-        return {}
-
-def crawl_website(
-    url: str, 
-    search_terms: List[str], 
-    api_key: str, 
-    max_results: int = 3
-) -> Tuple[List[str], List[str], List[str]]:
-    """
-    Crawl a website to find relevant regulation content using Firecrawl API.
-    This function is currently disabled for cloud deployment to avoid timeouts.
-    
-    Args:
-        url: Website URL to crawl
-        search_terms: List of search terms to find relevant content
-        api_key: Firecrawl API key
-        max_results: Maximum number of results to return
-    
-    Returns:
-        Tuple containing:
-            - List of regulation contents
-            - List of source URLs
-            - List of source titles
-    """
-    # Disable crawling for now to avoid timeouts in cloud deployment
-    logger.info(f"Crawling disabled for cloud deployment: {url}")
-    return [], [], []
+        raise
 
 def extract_relevant_content(content: str, search_terms: List[str]) -> str:
     """
