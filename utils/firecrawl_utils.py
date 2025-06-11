@@ -1,6 +1,7 @@
 import requests
 import logging
 import time
+import re
 from typing import List, Tuple, Dict, Any
 from config import (
     FIRECRAWL_BASE_URL, 
@@ -157,10 +158,10 @@ def fetch_regulation_data(
             # Get title of the website
             website_title = scrape_data.get("metadata", {}).get("title", website)
             
-            # Extract regulation content that's relevant to the query
-            relevant_content = extract_relevant_content(scrape_data["markdown"], search_terms)
+            # Extract regulation content that's relevant to the query - ENHANCED VERSION
+            relevant_content = extract_detailed_regulatory_content(scrape_data["markdown"], search_terms, query)
             
-            if relevant_content:
+            if relevant_content and len(relevant_content.strip()) > 100:  # Ensure substantial content
                 all_regulation_data.append(relevant_content)
                 all_source_urls.append(website)
                 all_source_titles.append(website_title)
@@ -198,6 +199,117 @@ def fetch_regulation_data(
     
     logger.info(f"Successfully fetched regulation data from {len(all_source_urls)} sources")
     return all_regulation_data, all_source_urls, all_source_titles
+
+def extract_detailed_regulatory_content(content: str, search_terms: List[str], query: str) -> str:
+    """
+    Enhanced content extraction that focuses on specific regulatory information.
+    
+    Args:
+        content: The full content from a webpage
+        search_terms: List of search terms to find relevant content
+        query: Original user query for context
+    
+    Returns:
+        Extracted relevant regulatory content as a string
+    """
+    if not content:
+        return ""
+    
+    # Split content into sections and paragraphs
+    sections = re.split(r'\n#{1,6}\s+', content)  # Split by markdown headers
+    relevant_sections = []
+    
+    # First pass: Find sections with high relevance
+    for section in sections:
+        if not section.strip():
+            continue
+            
+        section_score = 0
+        section_lower = section.lower()
+        
+        # Score based on search terms
+        for term in search_terms:
+            if term.lower() in section_lower:
+                section_score += 1
+        
+        # Bonus points for regulatory indicators
+        regulatory_indicators = [
+            'regulation', 'directive', 'standard', 'requirement', 'shall', 'must',
+            'compliance', 'certification', 'approval', 'limit', 'maximum', 'minimum',
+            'article', 'section', 'paragraph', 'amendment', 'annex'
+        ]
+        
+        for indicator in regulatory_indicators:
+            if indicator in section_lower:
+                section_score += 0.5
+        
+        # Bonus for specific regulation numbers
+        if re.search(r'(regulation|directive|standard)\s+(no\.?\s*)?(\d+|[A-Z]+[-/]\d+)', section_lower):
+            section_score += 2
+        
+        # Include if score is high enough
+        if section_score >= 2:
+            relevant_sections.append((section_score, section))
+    
+    # Sort by relevance score and take top sections
+    relevant_sections.sort(key=lambda x: x[0], reverse=True)
+    
+    # Extract the most relevant content
+    extracted_content = []
+    total_length = 0
+    max_content_length = 3000  # Limit to prevent token overflow
+    
+    for score, section in relevant_sections:
+        if total_length >= max_content_length:
+            break
+            
+        # Clean and format the section
+        cleaned_section = clean_regulatory_text(section)
+        
+        if len(cleaned_section) > 50:  # Only include substantial sections
+            extracted_content.append(cleaned_section)
+            total_length += len(cleaned_section)
+    
+    # If we don't have enough content, do a second pass with lower threshold
+    if not extracted_content:
+        paragraphs = content.split('\n\n')
+        for paragraph in paragraphs[:10]:  # Check first 10 paragraphs
+            if any(term.lower() in paragraph.lower() for term in search_terms):
+                cleaned_para = clean_regulatory_text(paragraph)
+                if len(cleaned_para) > 30:
+                    extracted_content.append(cleaned_para)
+    
+    return '\n\n'.join(extracted_content) if extracted_content else ""
+
+def clean_regulatory_text(text: str) -> str:
+    """
+    Clean and format regulatory text for better processing.
+    
+    Args:
+        text: Raw regulatory text
+    
+    Returns:
+        Cleaned text
+    """
+    # Remove excessive whitespace
+    text = re.sub(r'\n\s*\n', '\n\n', text)
+    text = re.sub(r' +', ' ', text)
+    
+    # Remove common navigation/footer elements
+    text = re.sub(r'(Cookie|Privacy|Terms|Contact|Navigation|Menu|Search|Login).*$', '', text, flags=re.IGNORECASE | re.MULTILINE)
+    
+    # Remove URLs that are not regulation references
+    text = re.sub(r'https?://[^\s]+(?<!\.pdf)(?<!regulations?)(?<!directive)', '', text)
+    
+    # Clean up markdown artifacts
+    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)  # Remove markdown links but keep text
+    text = re.sub(r'[*_]{1,2}([^*_]+)[*_]{1,2}', r'\1', text)  # Remove markdown emphasis
+    
+    # Remove excessive punctuation
+    text = re.sub(r'[.]{3,}', '...', text)
+    text = re.sub(r'[-]{3,}', '---', text)
+    
+    return text.strip()
 
 def extract_region_from_query(query: str) -> str:
     """Extract region information from query for Interregs search."""
@@ -255,14 +367,13 @@ def prepare_search_terms(query: str) -> List[str]:
     # Remove common words and split query into terms
     common_words = ["what", "is", "are", "the", "for", "a", "an", "in", "on", "about", "how", "can", "do", "does"]
     terms = query.lower().split()
-    terms = [term for term in terms if term not in common_words]
+    terms = [term for term in terms if term not in common_words and len(term) > 2]
     
     # Add specific regulation terminology
     regulation_terms = ["regulation", "standard", "directive", "requirement", "law", "homologation", "type approval"]
     region_terms = ["eu", "european", "us", "united states", "uk", "japan", "china", "global", "international"]
     
     # Find any specific regulation codes mentioned (e.g., ECE-R100)
-    import re
     reg_codes = re.findall(r'[A-Z]{1,5}[-]\d{1,4}', query)
     
     # Combine all search terms
@@ -292,7 +403,11 @@ def scrape_website(url: str, api_key: str) -> Dict[str, Any]:
     data = {
         "url": url,
         "formats": ["markdown"],
-        "timeout": 30000  # Timeout in milliseconds (30 seconds)
+        "timeout": 30000,  # Timeout in milliseconds (30 seconds)
+        "extractorOptions": {
+            "mode": "llm-extraction",
+            "extractionPrompt": "Extract all regulatory content, standards, requirements, and official guidelines related to automotive regulations. Include regulation numbers, compliance requirements, and official standards."
+        }
     }
     
     try:
@@ -321,45 +436,3 @@ def scrape_website(url: str, api_key: str) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Error in scrape_website for {url}: {str(e)}")
         raise
-
-def extract_relevant_content(content: str, search_terms: List[str]) -> str:
-    """
-    Extract relevant parts of the content based on search terms.
-    
-    Args:
-        content: The full content from a webpage
-        search_terms: List of search terms to find relevant content
-    
-    Returns:
-        Extracted relevant content as a string
-    """
-    if not content:
-        return ""
-    
-    # Split content into paragraphs
-    paragraphs = content.split('\n\n')
-    relevant_paragraphs = []
-    
-    for paragraph in paragraphs:
-        # Check if this paragraph contains any search terms
-        if any(term.lower() in paragraph.lower() for term in search_terms):
-            relevant_paragraphs.append(paragraph)
-    
-    # If we have too few paragraphs, widen the search
-    if len(relevant_paragraphs) < 2:
-        # Try looking for sentences containing our terms
-        sentences = content.replace('\n', ' ').split('. ')
-        for sentence in sentences:
-            if any(term.lower() in sentence.lower() for term in search_terms) and sentence not in ' '.join(relevant_paragraphs):
-                relevant_paragraphs.append(sentence + '.')
-    
-    # If still no relevant content found, return first few paragraphs as fallback
-    if not relevant_paragraphs and paragraphs:
-        relevant_paragraphs = paragraphs[:3]  # Return first 3 paragraphs
-    
-    # Join the relevant paragraphs into a single string
-    if relevant_paragraphs:
-        return '\n\n'.join(relevant_paragraphs)
-    
-    # If we couldn't find anything relevant, return an empty string
-    return ""
